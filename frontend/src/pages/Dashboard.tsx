@@ -15,7 +15,7 @@ import {
   IoAlertCircleOutline, IoExtensionPuzzleOutline, IoSparklesOutline, IoPeopleOutline,
   IoCloseOutline, IoCheckmarkOutline
 } from 'react-icons/io5';
-import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, addDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, addDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 
 interface Announcement {

@@ -72,7 +72,7 @@ export const Challenges: React.FC = () => {
       description: 'Complete 5 Learning or General tasks.',
       xpReward: 75,
       badgeName: 'Scholar Needle',
-      check: (stats, list) => list.filter(t => t.completed && !t.isDeleted && (t.category === 'Learning' || t.category === 'General')).length >= 5,
+      check: (_stats, list) => list.filter(t => t.completed && !t.isDeleted && (t.category === 'Learning' || t.category === 'General')).length >= 5,
     },
     {
       id: 'momentum_lord',
@@ -88,7 +88,7 @@ export const Challenges: React.FC = () => {
       description: 'Have at least 5 total tasks sketched, with 100% completion rate.',
       xpReward: 250,
       badgeName: 'Seamless Canvas',
-      check: (stats, list) => {
+      check: (_stats, list) => {
         const active = list.filter(t => !t.isDeleted);
         return active.length >= 5 && active.every(t => t.completed);
       },

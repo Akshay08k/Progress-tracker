@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../store';
-import { addTask, updateTask, toggleTaskCompleted, deleteTask, type Task } from '../store/tasksSlice';
+import { addTask, updateTask, deleteTask, type Task } from '../store/tasksSlice';
 import { showToast } from '../store/uiSlice';
 import { earnXp } from '../store/profileSlice';
 import { Card } from '../components/UI/Card';
