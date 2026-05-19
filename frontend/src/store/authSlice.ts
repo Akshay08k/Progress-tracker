@@ -16,6 +16,9 @@ export interface UserProfile {
     dailySummary: boolean;
     weeklyDigest: boolean;
   };
+  buddyUid?: string;
+  xpHistory?: { date: string; xp: number }[];
+  claimedChallenges?: string[];
   createdAt: string;
 }
 

@@ -20,6 +20,7 @@ export const Profile: React.FC = () => {
 
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -134,6 +135,24 @@ export const Profile: React.FC = () => {
             <div>
               <h3 className="text-sm font-bold text-text-primary uppercase">{user?.displayName}</h3>
               <span className="text-[10px] text-text-secondary font-mono-stats">{user?.email}</span>
+            </div>
+
+            <div className="mt-1 w-full max-w-[220px] bg-background-primary/50 border border-border-stitch rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2 text-[9px] font-mono-stats text-text-secondary">
+              <span className="truncate" title={user?.uid}>UID: {user?.uid}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (user?.uid) {
+                    navigator.clipboard.writeText(user.uid);
+                    setCopied(true);
+                    dispatch(showToast({ message: 'User ID copied to clipboard!', type: 'success' }));
+                    setTimeout(() => setCopied(false), 2000);
+                  }
+                }}
+                className="text-accent hover:text-accent/80 shrink-0 font-bold uppercase transition-colors"
+              >
+                {copied ? 'Copied' : 'Copy'}
+              </button>
             </div>
 
             <FabricBadge level={user?.level || 1} xp={user?.xp || 0} />

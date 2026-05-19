@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useAppDispatch, useAppSelector } from '../store';
 import { earnXp } from '../store/profileSlice';
 import { showToast } from '../store/uiSlice';
@@ -13,7 +13,7 @@ interface Challenge {
   description: string;
   xpReward: number;
   badgeName: string;
-  check: (stats: { completedTasksCount: number; level: number; streak: number; xp: number }) => boolean;
+  check: (stats: { completedTasksCount: number; level: number; streak: number; xp: number }, tasks: any[]) => boolean;
 }
 
 export const Challenges: React.FC = () => {
@@ -21,7 +21,8 @@ export const Challenges: React.FC = () => {
   const user = useAppSelector((state) => state.auth.user);
   const tasks = useAppSelector((state) => state.tasks.items);
 
-  const [claimedList, setClaimedList] = useState<string[]>([]);
+  // Set claimed list from the synced user profile
+  const claimedList = user?.claimedChallenges || [];
 
   // Challenges Definition
   const challenges: Challenge[] = [
@@ -56,6 +57,41 @@ export const Challenges: React.FC = () => {
       xpReward: 150,
       badgeName: 'Elite Weaver',
       check: (stats) => stats.xp >= 200,
+    },
+    {
+      id: 'stitch_master',
+      title: 'Stitch Master',
+      description: 'Complete 10 canvas tasks.',
+      xpReward: 200,
+      badgeName: 'Master Loom',
+      check: (stats) => stats.completedTasksCount >= 10,
+    },
+    {
+      id: 'knowledge_seeker',
+      title: 'Knowledge Seeker',
+      description: 'Complete 5 Learning or General tasks.',
+      xpReward: 75,
+      badgeName: 'Scholar Needle',
+      check: (stats, list) => list.filter(t => t.completed && !t.isDeleted && (t.category === 'Learning' || t.category === 'General')).length >= 5,
+    },
+    {
+      id: 'momentum_lord',
+      title: 'Momentum Lord',
+      description: 'Keep a streak of at least 5 active days.',
+      xpReward: 150,
+      badgeName: 'Daybreaker Flame',
+      check: (stats) => stats.streak >= 5,
+    },
+    {
+      id: 'perfect_thread',
+      title: 'Perfect Thread',
+      description: 'Have at least 5 total tasks sketched, with 100% completion rate.',
+      xpReward: 250,
+      badgeName: 'Seamless Canvas',
+      check: (stats, list) => {
+        const active = list.filter(t => !t.isDeleted);
+        return active.length >= 5 && active.every(t => t.completed);
+      },
     }
   ];
 
@@ -74,13 +110,17 @@ export const Challenges: React.FC = () => {
 
     try {
       dispatch(earnXp(ch.xpReward));
-      setClaimedList([...claimedList, ch.id]);
       
-      // Update XP in database
+      const newClaimed = [...claimedList, ch.id];
+      
+      // Update XP & Claimed List in database
       if (user?.uid) {
         const userRef = doc(db, 'users', user.uid);
         const newXp = (user.xp || 0) + ch.xpReward;
-        await updateDoc(userRef, { xp: newXp });
+        await updateDoc(userRef, { 
+          xp: newXp,
+          claimedChallenges: newClaimed
+        });
       }
 
       dispatch(showToast({ 
@@ -109,7 +149,7 @@ export const Challenges: React.FC = () => {
       {/* Roster Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {challenges.map((ch) => {
-          const isCompleted = ch.check(userStats);
+          const isCompleted = ch.check(userStats, tasks);
           const isClaimed = claimedList.includes(ch.id);
 
           return (
@@ -119,7 +159,7 @@ export const Challenges: React.FC = () => {
               className={`flex flex-col justify-between transition-all duration-300 ${isClaimed ? 'opacity-70' : ''}`}
               padding="p-6"
             >
-              <div className="flex items-start gap-4">
+              <div className="flex items-start gap-4 text-left">
                 {/* Visual Icon Badge */}
                 <div 
                   className={`

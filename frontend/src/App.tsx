@@ -5,7 +5,8 @@ import { loginSuccess, logout, setAuthLoading, type UserProfile } from './store/
 
 import { auth, db } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { setNotifications } from './store/notificationsSlice';
 
 // Layout & Global UI
 import Navbar from './components/Layout/Navbar';
@@ -24,6 +25,7 @@ import CalendarPage from './pages/CalendarPage';
 import Challenges from './pages/Challenges';
 import Profile from './pages/Profile';
 import Admin from './pages/Admin';
+import { AICopilot } from './pages/AICopilot';
 
 // Route Guards
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -76,17 +78,25 @@ export const App: React.FC = () => {
   // 2. Firebase auth state listener
   useEffect(() => {
     dispatch(setAuthLoading(true));
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+    let unsubscribeUserDoc: (() => void) | null = null;
+    let unsubscribeNotifications: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (fbUser) => {
+      // Clean up previous listeners if user changes
+      if (unsubscribeUserDoc) { unsubscribeUserDoc(); unsubscribeUserDoc = null; }
+      if (unsubscribeNotifications) { unsubscribeNotifications(); unsubscribeNotifications = null; }
+
       if (fbUser) {
         try {
           const token = await fbUser.getIdToken();
-          const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
+          const userDocRef = doc(db, 'users', fbUser.uid);
           
+          // Get initial snap to ensure UI loads fast
+          const userDoc = await getDoc(userDocRef);
           if (userDoc.exists()) {
             const profileData = userDoc.data() as UserProfile;
             dispatch(loginSuccess({ user: profileData, token }));
           } else {
-            // Document might still be creating in register page flow
             const tempProfile: UserProfile = {
               uid: fbUser.uid,
               email: fbUser.email || '',
@@ -103,6 +113,31 @@ export const App: React.FC = () => {
             };
             dispatch(loginSuccess({ user: tempProfile, token }));
           }
+
+          // Setup real-time listener on User Document
+          unsubscribeUserDoc = onSnapshot(userDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+              const updatedProfile = docSnap.data() as UserProfile;
+              dispatch(loginSuccess({ user: updatedProfile, token }));
+            }
+          }, (error) => {
+            console.error('User doc real-time sync error:', error);
+          });
+
+          // Setup real-time listener on Notifications Collection
+          const notificationsQuery = query(
+            collection(db, 'notifications'),
+            where('userId', '==', fbUser.uid),
+            orderBy('createdAt', 'desc')
+          );
+          
+          unsubscribeNotifications = onSnapshot(notificationsQuery, (snapshot) => {
+            const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+            dispatch(setNotifications(list));
+          }, (error) => {
+            console.warn('Notifications real-time sync warning:', error);
+          });
+
         } catch (e) {
           console.error('Failed to restore user session:', e);
           dispatch(logout());
@@ -113,7 +148,11 @@ export const App: React.FC = () => {
       dispatch(setAuthLoading(false));
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeUserDoc) unsubscribeUserDoc();
+      if (unsubscribeNotifications) unsubscribeNotifications();
+    };
   }, [dispatch]);
 
   if (authLoading) {
@@ -181,6 +220,14 @@ export const App: React.FC = () => {
               element={
                 <ProtectedRoute>
                   <Profile />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/ai-copilot" 
+              element={
+                <ProtectedRoute>
+                  <AICopilot />
                 </ProtectedRoute>
               } 
             />

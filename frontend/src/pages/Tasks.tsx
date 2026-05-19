@@ -36,6 +36,7 @@ export const Tasks: React.FC = () => {
   const [formDueDate, setFormDueDate] = useState(new Date().toISOString().split('T')[0]);
   const [formDueTime, setFormDueTime] = useState('12:00');
   const [formRecurring, setFormRecurring] = useState<'none' | 'daily' | 'weekly'>('none');
+  const [formColumnId, setFormColumnId] = useState<'todo' | 'in_progress' | 'done'>('todo');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
 
   const categories = ['Work', 'Personal', 'Health', 'Finance', 'Learning', 'General'];
@@ -50,6 +51,8 @@ export const Tasks: React.FC = () => {
     if (!formTitle.trim()) return;
 
     try {
+      const isNewlyDone = formColumnId === 'done' && (!editingTask || editingTask.columnId !== 'done');
+      
       const taskFields = {
         userId: user?.uid || 'anonymous',
         title: formTitle,
@@ -59,8 +62,8 @@ export const Tasks: React.FC = () => {
         dueDate: formDueDate,
         dueTime: formDueTime,
         recurring: formRecurring,
-        completed: editingTask ? editingTask.completed : false,
-        columnId: editingTask ? editingTask.columnId : 'todo',
+        completed: formColumnId === 'done',
+        columnId: formColumnId,
         updatedAt: new Date().toISOString()
       };
 
@@ -82,6 +85,30 @@ export const Tasks: React.FC = () => {
         dispatch(showToast({ message: 'Task created on canvas!', type: 'success' }));
       }
 
+      if (isNewlyDone) {
+        dispatch(earnXp(10));
+        // Update user XP inside Firestore
+        if (user?.uid) {
+          const userRef = doc(db, 'users', user.uid);
+          const newXp = (user.xp || 0) + 10;
+          await updateDoc(userRef, { xp: newXp });
+
+          // Log XP to user's xpHistory
+          const todayStr = new Date().toISOString().split('T')[0];
+          const currentHistory = user.xpHistory ? [...user.xpHistory] : [];
+          const existingEntryIdx = currentHistory.findIndex(h => h.date === todayStr);
+          if (existingEntryIdx !== -1) {
+            currentHistory[existingEntryIdx] = {
+              ...currentHistory[existingEntryIdx],
+              xp: currentHistory[existingEntryIdx].xp + 10
+            };
+          } else {
+            currentHistory.push({ date: todayStr, xp: 10 });
+          }
+          await updateDoc(userRef, { xpHistory: currentHistory });
+        }
+      }
+
       handleCloseModal();
     } catch (err: any) {
       console.error(err);
@@ -98,6 +125,7 @@ export const Tasks: React.FC = () => {
     setFormDueDate(new Date().toISOString().split('T')[0]);
     setFormDueTime('12:00');
     setFormRecurring('none');
+    setFormColumnId('todo');
     setModalOpen(true);
   };
 
@@ -110,6 +138,7 @@ export const Tasks: React.FC = () => {
     setFormDueDate(task.dueDate);
     setFormDueTime(task.dueTime || '12:00');
     setFormRecurring(task.recurring || 'none');
+    setFormColumnId(task.columnId || (task.completed ? 'done' : 'todo'));
     setModalOpen(true);
   };
 
@@ -118,19 +147,18 @@ export const Tasks: React.FC = () => {
     setEditingTask(null);
   };
 
-  const handleToggleComplete = async (taskId: string, currentCompleted: boolean) => {
+  const handleChangeTaskStatus = async (taskId: string, nextColumn: 'todo' | 'in_progress' | 'done') => {
     try {
       const taskRef = doc(db, 'tasks', taskId);
-      const nextCompleted = !currentCompleted;
-      const nextColumn = nextCompleted ? 'done' : 'todo';
+      const nextCompleted = nextColumn === 'done';
+
+      const existingTask = tasks.find(t => t.id === taskId);
+      const wasDone = existingTask?.columnId === 'done' || existingTask?.completed;
 
       await updateDoc(taskRef, { completed: nextCompleted, columnId: nextColumn });
-      dispatch(toggleTaskCompleted(taskId));
-
-      // Update local slice columns
       dispatch(updateTask({ id: taskId, completed: nextCompleted, columnId: nextColumn }));
 
-      if (nextCompleted) {
+      if (nextCompleted && !wasDone) {
         dispatch(earnXp(10));
         dispatch(showToast({ message: 'Stitch Completed! Gained +10 XP! 🧵', type: 'success' }));
 
@@ -139,11 +167,34 @@ export const Tasks: React.FC = () => {
           const userRef = doc(db, 'users', user.uid);
           const newXp = (user.xp || 0) + 10;
           await updateDoc(userRef, { xp: newXp });
+
+          // Log XP to user's xpHistory
+          const todayStr = new Date().toISOString().split('T')[0];
+          const currentHistory = user.xpHistory ? [...user.xpHistory] : [];
+          const existingEntryIdx = currentHistory.findIndex(h => h.date === todayStr);
+          if (existingEntryIdx !== -1) {
+            currentHistory[existingEntryIdx] = {
+              ...currentHistory[existingEntryIdx],
+              xp: currentHistory[existingEntryIdx].xp + 10
+            };
+          } else {
+            currentHistory.push({ date: todayStr, xp: 10 });
+          }
+          await updateDoc(userRef, { xpHistory: currentHistory });
         }
+      } else {
+        const laneName = nextColumn === 'todo' ? 'Need to Sew' : nextColumn === 'in_progress' ? 'Stitching In Progress' : 'Finished Stitches';
+        dispatch(showToast({ message: `Task moved to: ${laneName}`, type: 'success' }));
       }
     } catch (err) {
       console.error(err);
+      dispatch(showToast({ message: 'Failed to update status.', type: 'error' }));
     }
+  };
+
+  const handleToggleComplete = async (taskId: string, currentCompleted: boolean) => {
+    const nextColumn = !currentCompleted ? 'done' : 'todo';
+    await handleChangeTaskStatus(taskId, nextColumn);
   };
 
   const handleDeleteTask = async (taskId: string) => {
@@ -164,27 +215,7 @@ export const Tasks: React.FC = () => {
     if (destination.droppableId === source.droppableId && destination.index === source.index) return;
 
     const nextColumn = destination.droppableId as 'todo' | 'in_progress' | 'done';
-    const nextCompleted = nextColumn === 'done';
-
-    try {
-      const taskRef = doc(db, 'tasks', draggableId);
-      await updateDoc(taskRef, { columnId: nextColumn, completed: nextCompleted });
-
-      dispatch(updateTask({ id: draggableId, columnId: nextColumn, completed: nextCompleted }));
-
-      if (nextColumn === 'done' && source.droppableId !== 'done') {
-        dispatch(earnXp(10));
-        dispatch(showToast({ message: 'Thread Completed! Gained +10 XP!', type: 'success' }));
-
-        if (user?.uid) {
-          const userRef = doc(db, 'users', user.uid);
-          const newXp = (user.xp || 0) + 10;
-          await updateDoc(userRef, { xp: newXp });
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
+    await handleChangeTaskStatus(draggableId, nextColumn);
   };
 
   // Filter Tasks list
@@ -336,6 +367,16 @@ export const Tasks: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    <select
+                      value={t.columnId || (t.completed ? 'done' : 'todo')}
+                      onChange={(e) => handleChangeTaskStatus(t.id, e.target.value as any)}
+                      className="px-2 py-1 bg-background-primary border border-border-stitch rounded text-[10px] text-text-primary focus:outline-none focus:border-accent font-semibold"
+                    >
+                      <option value="todo">Need to Sew</option>
+                      <option value="in_progress">Stitching In Progress</option>
+                      <option value="done">Finished Stitches</option>
+                    </select>
+
                     <button
                       onClick={() => handleOpenEditModal(t)}
                       className="px-2.5 py-1 bg-background-primary hover:bg-background-primary/80 border border-border-stitch text-[10px] font-extrabold uppercase font-mono-stats text-text-secondary rounded"
@@ -552,6 +593,21 @@ export const Tasks: React.FC = () => {
                   <option value="none">No Recurrence</option>
                   <option value="daily">Daily Loop</option>
                   <option value="weekly">Weekly Loop</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1 tracking-wide">
+                  Stitch Status (Lane)
+                </label>
+                <select
+                  value={formColumnId}
+                  onChange={(e) => setFormColumnId(e.target.value as any)}
+                  className="w-full p-2.5 rounded-lg bg-background-primary border border-border-stitch text-text-primary focus:outline-none focus:border-accent font-bold"
+                >
+                  <option value="todo">Need to Sew (New)</option>
+                  <option value="in_progress">Stitching In Progress</option>
+                  <option value="done">Finished Stitches (Complete)</option>
                 </select>
               </div>
 

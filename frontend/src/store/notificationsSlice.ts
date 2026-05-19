@@ -5,7 +5,7 @@ export interface NotificationItem {
   userId: string;
   title: string;
   body: string;
-  type: 'task_reminder' | 'security_ip' | 'streak_risk' | 'summary' | 'level_up' | 'challenge_complete';
+  type: 'task_reminder' | 'security_ip' | 'streak_risk' | 'summary' | 'level_up' | 'challenge_complete' | 'streak_buddy';
   read: boolean;
   createdAt: string;
 }

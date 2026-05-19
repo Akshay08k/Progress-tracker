@@ -189,7 +189,7 @@ export const CalendarPage: React.FC = () => {
             <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
               <path
                 d={svgPath}
-                stroke="var(--accent)"
+                stroke="var(--color-accent)"
                 strokeWidth="2.5"
                 strokeDasharray="6 6"
                 fill="none"

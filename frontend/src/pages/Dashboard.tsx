@@ -12,8 +12,11 @@ import {
 } from 'recharts';
 import {
   IoFlameOutline, IoTimeOutline, IoJournalOutline,
-  IoAlertCircleOutline, IoExtensionPuzzleOutline, IoSparklesOutline, IoPeopleOutline
+  IoAlertCircleOutline, IoExtensionPuzzleOutline, IoSparklesOutline, IoPeopleOutline,
+  IoCloseOutline, IoCheckmarkOutline
 } from 'react-icons/io5';
+import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, addDoc, deleteDoc } from 'firebase/firestore';
+import { db } from '../services/firebase';
 
 interface Announcement {
   message: string;
@@ -27,7 +30,241 @@ export const Dashboard: React.FC = () => {
   const tasks = useAppSelector((state) => state.tasks.items);
 
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
-  const [partnerMessage, setPartnerMessage] = useState('Sync your code with an accountability partner to share streaks!');
+  
+  // Streak Buddy States
+  const [partnerUidInput, setPartnerUidInput] = useState('');
+  const [buddyData, setBuddyData] = useState<any>(null);
+  const [incomingInvites, setIncomingInvites] = useState<any[]>([]);
+  const [outgoingInvite, setOutgoingInvite] = useState<any>(null);
+  const [sendingInvite, setSendingInvite] = useState(false);
+
+  // Sync completed tasks to user's xpHistory once on dashboard load if empty
+  useEffect(() => {
+    const syncXpHistory = async () => {
+      if (!user?.uid || (user.xpHistory && user.xpHistory.length > 0)) return;
+      
+      const last7Days = Array.from({ length: 7 }).map((_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        return d.toISOString().split('T')[0];
+      });
+
+      const dailyCompletedXp: { [date: string]: number } = {};
+      
+      tasks.forEach(task => {
+        if (task.completed && !task.isDeleted && task.dueDate && last7Days.includes(task.dueDate)) {
+          dailyCompletedXp[task.dueDate] = (dailyCompletedXp[task.dueDate] || 0) + 10;
+        }
+      });
+
+      const initialHistory = last7Days.map(date => ({
+        date,
+        xp: dailyCompletedXp[date] || 0
+      })).filter(h => h.xp > 0);
+
+      if (initialHistory.length > 0) {
+        try {
+          const userDocRef = doc(db, 'users', user.uid);
+          await updateDoc(userDocRef, {
+            xpHistory: initialHistory
+          });
+        } catch (e) {
+          console.error('Failed to seed xpHistory from tasks:', e);
+        }
+      }
+    };
+
+    if (tasks.length > 0 && user) {
+      syncXpHistory();
+    }
+  }, [user, tasks]);
+
+  // Real-time Buddy Data observer
+  useEffect(() => {
+    if (!user?.buddyUid) {
+      setBuddyData(null);
+      return;
+    }
+    const unsub = onSnapshot(doc(db, 'users', user.buddyUid), (docSnap) => {
+      if (docSnap.exists()) {
+        setBuddyData(docSnap.data());
+      }
+    }, (error) => {
+      console.warn('Buddy sync warning:', error);
+    });
+    return () => unsub();
+  }, [user?.buddyUid]);
+
+  // Real-time Invites observer
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    // Incoming invites
+    const qIn = query(
+      collection(db, 'buddyInvites'),
+      where('receiverUid', '==', user.uid),
+      where('status', '==', 'pending')
+    );
+    const unsubIn = onSnapshot(qIn, (snap) => {
+      setIncomingInvites(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => {
+      console.warn('Incoming invites sync warning:', error);
+    });
+
+    // Outgoing invites
+    const qOut = query(
+      collection(db, 'buddyInvites'),
+      where('senderUid', '==', user.uid),
+      where('status', '==', 'pending')
+    );
+    const unsubOut = onSnapshot(qOut, (snap) => {
+      if (!snap.empty) {
+        setOutgoingInvite({ id: snap.docs[0].id, ...snap.docs[0].data() });
+      } else {
+        setOutgoingInvite(null);
+      }
+    }, (error) => {
+      console.warn('Outgoing invite sync warning:', error);
+    });
+
+    return () => {
+      unsubIn();
+      unsubOut();
+    };
+  }, [user?.uid]);
+
+  // Actions for Buddy System
+  const handleSendInvite = async () => {
+    if (!user?.uid) return;
+    const target = partnerUidInput.trim();
+    if (!target) {
+      dispatch(showToast({ message: 'Please enter a valid partner UID.', type: 'error' }));
+      return;
+    }
+    if (target === user.uid) {
+      dispatch(showToast({ message: 'You cannot invite yourself as a buddy!', type: 'error' }));
+      return;
+    }
+    if (user.buddyUid) {
+      dispatch(showToast({ message: 'You are already linked to a buddy. Unlink them first.', type: 'error' }));
+      return;
+    }
+
+    setSendingInvite(true);
+    try {
+      // Check if target user exists in Firestore
+      const targetUserDoc = await getDoc(doc(db, 'users', target));
+      if (!targetUserDoc.exists()) {
+        dispatch(showToast({ message: 'No registered user found with that UID. Check the ID and try again.', type: 'error' }));
+        setSendingInvite(false);
+        return;
+      }
+
+      const targetData = targetUserDoc.data();
+      if (targetData.buddyUid) {
+        dispatch(showToast({ message: 'This user is already linked with another buddy.', type: 'error' }));
+        setSendingInvite(false);
+        return;
+      }
+
+      // Add to buddyInvites
+      await addDoc(collection(db, 'buddyInvites'), {
+        senderUid: user.uid,
+        senderName: user.displayName || 'Stitch Member',
+        receiverUid: target,
+        status: 'pending',
+        createdAt: new Date().toISOString()
+      });
+
+      // Send real-time notification
+      await addDoc(collection(db, 'notifications'), {
+        userId: target,
+        title: 'Streak Buddy Invitation 🧵',
+        body: `${user.displayName || 'A fellow weaver'} invited you to be their Streak Buddy! Accept from your Command Console.`,
+        type: 'streak_buddy',
+        read: false,
+        createdAt: new Date().toISOString()
+      });
+
+      dispatch(showToast({ message: 'Streak Buddy invitation sent successfully!', type: 'success' }));
+      setPartnerUidInput('');
+    } catch (e) {
+      console.error(e);
+      dispatch(showToast({ message: 'Failed to send invitation.', type: 'error' }));
+    } finally {
+      setSendingInvite(false);
+    }
+  };
+
+  const handleAcceptInvite = async (invite: any) => {
+    if (!user?.uid) return;
+    try {
+      // 1. Update invite status in Firestore
+      await updateDoc(doc(db, 'buddyInvites', invite.id), { status: 'accepted' });
+
+      // 2. Set buddyUid on both users
+      await updateDoc(doc(db, 'users', user.uid), { buddyUid: invite.senderUid });
+      await updateDoc(doc(db, 'users', invite.senderUid), { buddyUid: user.uid });
+
+      // 3. Send acceptance notification back to sender
+      await addDoc(collection(db, 'notifications'), {
+        userId: invite.senderUid,
+        title: 'Stitch Buddy Synced! 🤝',
+        body: `${user.displayName || 'Your buddy'} accepted your Streak Buddy request! Streaks are now synced.`,
+        type: 'streak_buddy',
+        read: false,
+        createdAt: new Date().toISOString()
+      });
+
+      dispatch(showToast({ message: 'Streak Buddy successfully connected!', type: 'success' }));
+    } catch (e) {
+      console.error(e);
+      dispatch(showToast({ message: 'Failed to accept invitation.', type: 'error' }));
+    }
+  };
+
+  const handleDeclineInvite = async (invite: any) => {
+    try {
+      await updateDoc(doc(db, 'buddyInvites', invite.id), { status: 'declined' });
+      dispatch(showToast({ message: 'Invitation declined.', type: 'info' }));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCancelInvite = async (invite: any) => {
+    try {
+      await updateDoc(doc(db, 'buddyInvites', invite.id), { status: 'declined' });
+      dispatch(showToast({ message: 'Outgoing invitation cancelled.', type: 'info' }));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleUnlinkBuddy = async () => {
+    if (!user?.uid || !user?.buddyUid) return;
+    const oldBuddyUid = user.buddyUid;
+    try {
+      // 1. Clear buddyUid from both users
+      await updateDoc(doc(db, 'users', user.uid), { buddyUid: null });
+      await updateDoc(doc(db, 'users', oldBuddyUid), { buddyUid: null });
+
+      // 2. Send notification to the other buddy
+      await addDoc(collection(db, 'notifications'), {
+        userId: oldBuddyUid,
+        title: 'Streak Buddy Unlinked 🧵',
+        body: `${user.displayName || 'Your partner'} has disconnected their Streak Buddy account from yours.`,
+        type: 'streak_buddy',
+        read: false,
+        createdAt: new Date().toISOString()
+      });
+
+      dispatch(showToast({ message: 'Streak Buddy successfully unlinked.', type: 'success' }));
+    } catch (e) {
+      console.error(e);
+      dispatch(showToast({ message: 'Failed to unlink.', type: 'error' }));
+    }
+  };
 
   // Fetch announcements
   useEffect(() => {
@@ -87,16 +324,27 @@ export const Dashboard: React.FC = () => {
 
   const COLORS = ['#534ab7', '#10b981', '#d85a30', '#7f77dd', '#378add', '#8b5cf6'];
 
-  // Recharts Chart 2: Daily Focus XP (Area Chart - Mocked last 7 days of focus)
-  const xpHistoryData = [
-    { day: 'Mon', xp: 20 },
-    { day: 'Tue', xp: 45 },
-    { day: 'Wed', xp: 30 },
-    { day: 'Thu', xp: 75 },
-    { day: 'Fri', xp: 60 },
-    { day: 'Sat', xp: 90 },
-    { day: 'Sun', xp: user?.xp ? Math.min(user.xp, 120) : 40 },
-  ];
+  // Recharts Chart 2: Daily Focus XP (Area Chart - Dynamic last 7 days of focus)
+  const getXpHistoryData = () => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const data = [];
+    
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayLabel = days[d.getDay()];
+      
+      const historyEntry = user?.xpHistory?.find(h => h.date === dateStr);
+      data.push({
+        day: dayLabel,
+        xp: historyEntry ? historyEntry.xp : 0
+      });
+    }
+    return data;
+  };
+
+  const xpHistoryData = getXpHistoryData();
 
   // XP progression details
   const currentXp = user?.xp || 0;
@@ -224,19 +472,19 @@ export const Dashboard: React.FC = () => {
               <AreaChart data={xpHistoryData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorXp" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="var(--accent)" stopOpacity={0.0} />
+                    <stop offset="5%" stopColor="var(--color-accent)" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="var(--color-accent)" stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#212030" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-stitch)" />
                 <XAxis dataKey="day" stroke="#9ca3af" fontSize={10} fontFamily="monospace" />
                 <YAxis stroke="#9ca3af" fontSize={10} fontFamily="monospace" />
                 <Tooltip
-                  contentStyle={{ backgroundColor: 'var(--background-surface)', borderColor: 'var(--border-stitch)' }}
+                  contentStyle={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-stitch)' }}
                   labelStyle={{ color: 'var(--text-primary)', fontSize: '10px', fontFamily: 'monospace' }}
-                  itemStyle={{ color: 'var(--accent)', fontSize: '12px' }}
+                  itemStyle={{ color: 'var(--color-accent)', fontSize: '12px' }}
                 />
-                <Area type="monotone" dataKey="xp" stroke="var(--accent)" strokeWidth={2} fillOpacity={1} fill="url(#colorXp)" />
+                <Area type="monotone" dataKey="xp" stroke="var(--color-accent)" strokeWidth={2} fillOpacity={1} fill="url(#colorXp)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -288,33 +536,147 @@ export const Dashboard: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
         {/* Accountability Widget */}
-        <Card className="flex items-start gap-4" padding="p-6">
-          <div className="p-3 bg-accent/10 text-accent rounded-xl border border-dashed border-accent/40 shrink-0">
-            <IoPeopleOutline className="text-2xl" />
-          </div>
-          <div className="space-y-1 flex-1">
-            <span className="text-[9px] font-bold text-accent uppercase font-mono-stats block">ACCOUNTABILITY PAIR</span>
-            <h4 className="text-xs font-bold text-text-primary uppercase">Streak Buddy System</h4>
-            <p className="text-xs text-text-secondary leading-relaxed">
-              {partnerMessage}
-            </p>
-            <div className="pt-2 flex items-center gap-2">
-              <input
-                type="text"
-                placeholder="Partner UID..."
-                className="px-2 py-1 bg-background-primary border border-border-stitch rounded text-[10px] text-text-primary focus:outline-none focus:border-accent w-full max-w-[150px]"
-              />
-              <button
-                onClick={() => {
-                  setPartnerMessage('Partner synchronized successfully! Streaks are active.');
-                  dispatch(showToast({ message: 'Accountability partner linked!', type: 'success' }));
-                }}
-                className="px-2 py-1 bg-accent border border-white rounded text-[10px] text-white font-extrabold uppercase font-mono-stats"
-              >
-                Sync
-              </button>
+        <Card className="flex flex-col gap-4" padding="p-6">
+          <div className="flex items-start gap-4">
+            <div className="p-3 bg-accent/10 text-accent rounded-xl border border-dashed border-accent/40 shrink-0">
+              <IoPeopleOutline className="text-2xl animate-float-slow" />
+            </div>
+            <div className="space-y-1 flex-1 text-left">
+              <span className="text-[9px] font-bold text-accent uppercase font-mono-stats block">ACCOUNTABILITY PAIR</span>
+              <h4 className="text-xs font-bold text-text-primary uppercase">Streak Buddy System</h4>
+              
+              {!user?.buddyUid && !outgoingInvite && incomingInvites.length === 0 && (
+                <>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    Collaborate with a friend to share streaks and hold each other accountable! Enter your partner's UID.
+                  </p>
+                  <div className="pt-2.5 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={partnerUidInput}
+                      onChange={(e) => setPartnerUidInput(e.target.value)}
+                      placeholder="Partner UID..."
+                      disabled={sendingInvite}
+                      className="px-3 py-1.5 bg-background-primary border border-border-stitch rounded-lg text-[10px] text-text-primary focus:outline-none focus:border-accent w-full max-w-[200px] font-mono-stats"
+                    />
+                    <button
+                      onClick={handleSendInvite}
+                      disabled={sendingInvite}
+                      className="px-4 py-1.5 bg-accent hover:bg-accent/90 border border-white text-white text-[10px] font-extrabold uppercase font-mono-stats rounded-lg shadow-orbital transition-all duration-200"
+                    >
+                      {sendingInvite ? 'Sending...' : 'Invite'}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Outgoing pending request */}
+              {!user?.buddyUid && outgoingInvite && (
+                <div className="pt-1.5 space-y-2">
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    Outgoing invitation sent to:
+                    <span className="block font-mono-stats text-[10px] bg-background-primary/50 border border-border-stitch px-2 py-1 rounded mt-1 truncate">
+                      {outgoingInvite.receiverUid}
+                    </span>
+                    Waiting for them to sync and accept...
+                  </p>
+                  <button
+                    onClick={() => handleCancelInvite(outgoingInvite)}
+                    className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 text-[9px] font-bold uppercase rounded font-mono-stats transition-all"
+                  >
+                    Cancel Invite
+                  </button>
+                </div>
+              )}
+
+              {/* Incoming pending requests */}
+              {!user?.buddyUid && incomingInvites.length > 0 && (
+                <div className="pt-1.5 space-y-3">
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    You have a pending invite from:
+                  </p>
+                  {incomingInvites.map((invite) => (
+                    <div key={invite.id} className="p-3 bg-background-primary/60 border border-dashed border-accent/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-bold text-text-primary uppercase">{invite.senderName}</div>
+                        <div className="text-[8px] font-mono-stats text-text-secondary/70 truncate max-w-[160px]">{invite.senderUid}</div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => handleAcceptInvite(invite)}
+                          className="p-1 px-2.5 bg-accent text-white border border-white text-[9px] font-extrabold uppercase rounded-md flex items-center gap-1 hover:bg-accent/90 transition-all font-mono-stats"
+                        >
+                          <IoCheckmarkOutline />
+                          Accept
+                        </button>
+                        <button
+                          onClick={() => handleDeclineInvite(invite)}
+                          className="p-1 px-2.5 bg-background-surface text-text-secondary border border-border-stitch text-[9px] font-bold uppercase rounded-md flex items-center gap-1 hover:bg-background-primary transition-all font-mono-stats"
+                        >
+                          <IoCloseOutline />
+                          Decline
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Linked Buddy Side-by-Side Dashboard */}
+          {user?.buddyUid && buddyData && (
+            <div className="pt-2 border-t border-dashed border-border-stitch mt-2 space-y-4 text-left">
+              <div className="grid grid-cols-2 gap-4 text-center">
+                {/* You Column */}
+                <div className="p-3 bg-background-primary/50 border border-border-stitch rounded-xl relative">
+                  <span className="absolute top-2 left-2 text-[8px] font-bold text-accent uppercase font-mono-stats">YOU</span>
+                  <div className="mt-3 font-bold text-text-primary text-sm uppercase truncate">{user.displayName}</div>
+                  <div className="text-[9px] font-mono-stats text-text-secondary mt-0.5">LVL {user.level}</div>
+                  <div className="mt-2 text-xl font-bold font-mono-stats text-red-500 flex items-center justify-center gap-0.5" title="Your Streak">
+                    <IoFlameOutline className="animate-pulse" />
+                    {user.streak || 0}
+                  </div>
+                  <div className="text-[8px] font-mono-stats text-text-secondary/60 mt-1">{user.xp} XP total</div>
+                </div>
+
+                {/* Buddy Column */}
+                <div className="p-3 bg-accent/5 border border-accent/20 rounded-xl relative">
+                  <span className="absolute top-2 left-2 text-[8px] font-bold text-accent uppercase font-mono-stats">BUDDY</span>
+                  <div className="mt-3 font-bold text-text-primary text-sm uppercase truncate">{buddyData.displayName || 'Stitch Buddy'}</div>
+                  <div className="text-[9px] font-mono-stats text-text-secondary mt-0.5">LVL {buddyData.level || 1}</div>
+                  <div className="mt-2 text-xl font-bold font-mono-stats text-red-500 flex items-center justify-center gap-0.5" title="Buddy's Streak">
+                    <IoFlameOutline className="animate-pulse text-red-500" />
+                    {buddyData.streak || 0}
+                  </div>
+                  <div className="text-[8px] font-mono-stats text-text-secondary/60 mt-1">{buddyData.xp || 0} XP total</div>
+                </div>
+              </div>
+
+              {/* Comparision motivational banner */}
+              <div className="p-2.5 rounded-lg text-center text-[10px] font-semibold bg-background-primary border border-border-stitch flex items-center justify-center gap-1.5 uppercase font-mono-stats">
+                {user.streak > (buddyData.streak || 0) && (
+                  <span>🏆 You are leading the thread! Keep it up!</span>
+                )}
+                {user.streak < (buddyData.streak || 0) && (
+                  <span>🔥 Catch up! {buddyData.displayName || 'Buddy'} is leading with a {buddyData.streak} day streak!</span>
+                )}
+                {user.streak === (buddyData.streak || 0) && (
+                  <span>💪 Thread Synced! You both have an active {user.streak} day streak!</span>
+                )}
+              </div>
+
+              {/* Unlink button */}
+              <div className="flex justify-end">
+                <button
+                  onClick={handleUnlinkBuddy}
+                  className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 text-[9px] font-bold uppercase rounded font-mono-stats transition-all"
+                >
+                  Unlink Buddy
+                </button>
+              </div>
+            </div>
+          )}
         </Card>
 
         {/* Quick Navigate panel */}

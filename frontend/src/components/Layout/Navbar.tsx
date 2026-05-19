@@ -7,10 +7,10 @@ import { toggleNotificationsPanel } from '../../store/notificationsSlice';
 import { signOut } from 'firebase/auth';
 import { auth } from '../../services/firebase';
 import ThemeSelector from './ThemeSelector';
-import { 
-  IoNotificationsOutline, 
-  IoMenuOutline, 
-  IoCloseOutline, 
+import {
+  IoNotificationsOutline,
+  IoMenuOutline,
+  IoCloseOutline,
   IoLogOutOutline,
   IoPersonOutline,
   IoShieldCheckmarkOutline,
@@ -20,11 +20,11 @@ import {
 export const Navbar: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  
+
   const { user, isAuthenticated } = useAppSelector((state) => state.auth);
   const { unreadCount } = useAppSelector((state) => state.notifications);
   const mobileDrawerOpen = useAppSelector((state) => state.ui.mobileDrawerOpen);
-  
+
   const [avatarOpen, setAvatarOpen] = useState(false);
   const avatarRef = useRef<HTMLDivElement>(null);
 
@@ -33,6 +33,7 @@ export const Navbar: React.FC = () => {
     { path: '/calendar', label: 'Calendar' },
     { path: '/tasks', label: 'Tasks' },
     { path: '/challenges', label: 'Challenges' },
+    { path: '/ai-copilot', label: 'AI Copilot' },
   ];
 
   useEffect(() => {
@@ -60,7 +61,7 @@ export const Navbar: React.FC = () => {
   return (
     <nav className="fixed top-0 left-0 right-0 h-16 bg-background-surface border-b border-border-stitch z-40 transition-colors duration-300">
       <div className="max-w-7xl mx-auto h-full px-4 flex items-center justify-between">
-        
+
         {/* Left: Logo & Mobile Toggle */}
         <div className="flex items-center gap-3">
           <button
@@ -69,7 +70,7 @@ export const Navbar: React.FC = () => {
           >
             {mobileDrawerOpen ? <IoCloseOutline className="text-2xl" /> : <IoMenuOutline className="text-2xl" />}
           </button>
-          
+
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate('/dashboard')}>
             <div className="w-8 h-8 rounded-lg bg-accent border-2 border-double border-white flex items-center justify-center shadow-orbital animate-float-slow">
               <span className="text-white font-extrabold text-sm font-mono-stats">S</span>
@@ -95,7 +96,7 @@ export const Navbar: React.FC = () => {
                 <>
                   <span>{link.label}</span>
                   {isActive && (
-                    <span 
+                    <span
                       className="absolute bottom-0 left-0 w-full h-0.5 border-b-2 border-dashed border-accent animate-stitch-draw"
                       style={{ strokeDasharray: '4', strokeDashoffset: '4' }}
                     ></span>
@@ -108,7 +109,7 @@ export const Navbar: React.FC = () => {
 
         {/* Right: Actions Menu */}
         <div className="flex items-center gap-4">
-          
+
           {/* Pomodoro Button */}
           <button
             onClick={() => dispatch(toggleFocusTimer(true))}
@@ -138,7 +139,7 @@ export const Navbar: React.FC = () => {
           {/* Avatar Menu Dropdown */}
           <div className="relative" ref={avatarRef}>
             <button
-              onClick={() => setAvatarOpen(prev => !prev)}
+              onClick={() => setAvatarOpen(!avatarOpen)}
               className="w-9 h-9 rounded-full bg-background-primary border border-border-stitch flex items-center justify-center overflow-hidden hover:border-accent hover:shadow-orbital transition-all focus:outline-none relative"
             >
               {user?.photoURL ? (
@@ -201,11 +202,11 @@ export const Navbar: React.FC = () => {
 
       {/* Mobile Drawer Overlay */}
       {mobileDrawerOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/40 backdrop-blur-sm z-30 md:hidden"
           onClick={() => dispatch(toggleMobileDrawer(false))}
         >
-          <div 
+          <div
             className="w-64 h-full bg-background-surface border-r border-border-stitch p-4 flex flex-col justify-between"
             onClick={(e) => e.stopPropagation()}
           >
