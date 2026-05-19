@@ -42,6 +42,20 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
 };
 
+const PublicRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated, loading } = useAppSelector((state) => state.auth);
+  
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background-primary flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-dashed border-accent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+  
+  return !isAuthenticated ? <>{children}</> : <Navigate to="/dashboard" replace />;
+};
+
 const AdminRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isAuthenticated, loading } = useAppSelector((state) => state.auth);
   
@@ -178,9 +192,30 @@ export const App: React.FC = () => {
         <div className="pt-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <Routes>
             {/* Public Auth Routes */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route 
+              path="/login" 
+              element={
+                <PublicRoute>
+                  <Login />
+                </PublicRoute>
+              } 
+            />
+            <Route 
+              path="/register" 
+              element={
+                <PublicRoute>
+                  <Register />
+                </PublicRoute>
+              } 
+            />
+            <Route 
+              path="/forgot-password" 
+              element={
+                <PublicRoute>
+                  <ForgotPassword />
+                </PublicRoute>
+              } 
+            />
 
             {/* Protected Core App Routes */}
             <Route 
