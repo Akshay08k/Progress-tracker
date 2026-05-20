@@ -8,6 +8,7 @@ import themeReducer from './themeSlice';
 import profileReducer from './profileSlice';
 import adminReducer from './adminSlice';
 import uiReducer from './uiSlice';
+import habitsReducer from './habitsSlice';
 
 export const store = configureStore({
   reducer: {
@@ -19,6 +20,7 @@ export const store = configureStore({
     profile: profileReducer,
     admin: adminReducer,
     ui: uiReducer,
+    habits: habitsReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

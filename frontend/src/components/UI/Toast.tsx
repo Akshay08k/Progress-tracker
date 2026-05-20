@@ -11,7 +11,7 @@ export const Toast: React.FC = () => {
     if (visible) {
       const timer = setTimeout(() => {
         dispatch(hideToast());
-      }, 4000);
+      }, 3000);
       return () => clearTimeout(timer);
     }
   }, [visible, dispatch]);
@@ -21,24 +21,24 @@ export const Toast: React.FC = () => {
   const getStyle = () => {
     if (type === 'success') {
       return { 
-        bg: 'bg-green-500/10 border-green-500/40 text-green-500', 
+        bg: 'bg-green-500 border-green-500 text-green-700', 
         icon: <IoCheckmarkCircleOutline className="text-lg" /> 
       };
     }
     if (type === 'error') {
       return { 
-        bg: 'bg-red-500/10 border-red-500/40 text-red-500', 
+        bg: 'bg-red-500 border-red-500 text-red-700', 
         icon: <IoCloseCircleOutline className="text-lg" /> 
       };
     }
     if (type === 'warning') {
       return { 
-        bg: 'bg-orange-500/10 border-orange-500/40 text-orange-500', 
+        bg: 'bg-orange-500 border-orange-500 text-orange-700', 
         icon: <IoWarningOutline className="text-lg" /> 
       };
     }
     return { 
-      bg: 'bg-blue-500/10 border-blue-500/40 text-blue-500', 
+      bg: 'bg-blue-500 border-blue-500 text-blue-700', 
       icon: <IoInformationCircleOutline className="text-lg" /> 
     };
   };
@@ -47,17 +47,14 @@ export const Toast: React.FC = () => {
 
   return (
     <div
-      className={`
-        fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl border shadow-floating
-        animate-slideIn ${style.bg}
-      `}
-      style={{ minWidth: '280px' }}
+      className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg animate-fadeIn ${style.bg} bg-opacity-10`}
+      style={{ minWidth: '280px', maxWidth: '400px' }}
     >
       <span>{style.icon}</span>
-      <span className="text-xs font-semibold flex-1 leading-snug">{message}</span>
+      <span className="text-sm font-medium flex-1">{message}</span>
       <button 
         onClick={() => dispatch(hideToast())} 
-        className="p-0.5 rounded text-current hover:bg-black/5 focus:outline-none"
+        className="p-0.5 rounded hover:bg-black/5 transition-colors"
       >
         <IoCloseOutline className="text-base" />
       </button>

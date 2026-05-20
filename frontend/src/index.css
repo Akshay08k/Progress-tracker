@@ -1,80 +1,68 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Theme Variables Map */
-:root, .theme-dark-void {
-  --bg-primary: #0A0A0F;
-  --bg-surface: #111118;
-  --color-accent: #534AB7;
-  --color-accent-rgb: 83, 74, 183;
-  --color-accent-muted: rgba(83, 74, 183, 0.15);
-  --text-primary: #F3F4F6;
-  --text-secondary: #9CA3AF;
-  --border-stitch: #212030;
-  --stitch-dashed: #534AB7;
+/* Default theme: Light */
+:root {
+  --bg-primary: #f8fafc;
+  --bg-surface: #ffffff;
+  --color-accent: #6366f1;
+  --color-accent-rgb: 99, 102, 241;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --border-color: #e2e8f0;
 }
 
-.theme-light-canvas {
-  --bg-primary: #F8F7F4;
-  --bg-surface: #FFFFFF;
-  --color-accent: #1A1A1A;
-  --color-accent-rgb: 26, 26, 26;
-  --color-accent-muted: rgba(26, 26, 26, 0.08);
-  --text-primary: #1F2937;
-  --text-secondary: #4B5563;
-  --border-stitch: #E5E7EB;
-  --stitch-dashed: #1A1A1A;
+.theme-dark {
+  --bg-primary: #0f172a;
+  --bg-surface: #1e293b;
+  --color-accent: #6366f1;
+  --color-accent-rgb: 99, 102, 241;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --border-color: #334155;
 }
 
-.theme-forest-green {
-  --bg-primary: #0D1A0F;
-  --bg-surface: #132616;
-  --color-accent: #1D9E75;
-  --color-accent-rgb: 29, 158, 117;
-  --color-accent-muted: rgba(29, 158, 117, 0.15);
-  --text-primary: #ECFDF5;
-  --text-secondary: #A7F3D0;
-  --border-stitch: #1B3520;
-  --stitch-dashed: #1D9E75;
+.theme-forest {
+  --bg-primary: #052e16;
+  --bg-surface: #14532d;
+  --color-accent: #22c55e;
+  --color-accent-rgb: 34, 197, 94;
+  --text-primary: #f0fdf4;
+  --text-secondary: #86efac;
+  --border-color: #166534;
 }
 
-.theme-midnight-purple {
-  --bg-primary: #0D0A1A;
-  --bg-surface: #141026;
-  --color-accent: #7F77DD;
-  --color-accent-rgb: 127, 119, 221;
-  --color-accent-muted: rgba(127, 119, 221, 0.15);
-  --text-primary: #F5F3FF;
-  --text-secondary: #C4B5FD;
-  --border-stitch: #221D3A;
-  --stitch-dashed: #7F77DD;
+.theme-ocean {
+  --bg-primary: #0c1929;
+  --bg-surface: #152238;
+  --color-accent: #06b6d4;
+  --color-accent-rgb: 6, 182, 212;
+  --text-primary: #f0f9ff;
+  --text-secondary: #7dd3fc;
+  --border-color: #1e3a5f;
 }
 
-.theme-ember-orange {
-  --bg-primary: #1A0D08;
-  --bg-surface: #26130C;
-  --color-accent: #D85A30;
-  --color-accent-rgb: 216, 90, 48;
-  --color-accent-muted: rgba(216, 90, 48, 0.15);
-  --text-primary: #FFF7ED;
-  --text-secondary: #FFEDD5;
-  --border-stitch: #3C1E12;
-  --stitch-dashed: #D85A30;
+.theme-sunset {
+  --bg-primary: #1c0f0a;
+  --bg-surface: #2d1a12;
+  --color-accent: #f97316;
+  --color-accent-rgb: 249, 115, 22;
+  --text-primary: #fff7ed;
+  --text-secondary: #fdba74;
+  --border-color: #4a2518;
 }
 
-.theme-arctic-frost {
-  --bg-primary: #F0F4F8;
-  --bg-surface: #FFFFFF;
-  --color-accent: #378ADD;
-  --color-accent-rgb: 55, 138, 221;
-  --color-accent-muted: rgba(55, 138, 221, 0.1);
-  --text-primary: #1E293B;
-  --text-secondary: #475569;
-  --border-stitch: #E2E8F0;
-  --stitch-dashed: #378ADD;
+.theme-rose {
+  --bg-primary: #1a0a0e;
+  --bg-surface: #2d1219;
+  --color-accent: #f43f5e;
+  --color-accent-rgb: 244, 63, 94;
+  --text-primary: #fff1f2;
+  --text-secondary: #fda4af;
+  --border-color: #4a1525;
 }
 
 /* Global Styles */
@@ -82,70 +70,34 @@ body {
   margin: 0;
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  font-family: 'Outfit', 'Inter', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   transition: background-color 0.3s ease, color 0.3s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Design System - Custom Utilities */
-
-/* 1. Spatial Floating Card Layouts */
-.floating-card {
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-stitch);
-  border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(var(--color-accent-rgb), 0.04);
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
-}
-.floating-card:hover {
-  transform: translateY(-2px) scale(1.005);
-  box-shadow: 0 8px 32px rgba(var(--color-accent-rgb), 0.08);
-  border-color: rgba(var(--color-accent-rgb), 0.3);
-}
-
-/* 2. Tactile Sewing Thread Borders */
-.border-stitched {
-  border: 1px dashed var(--stitch-dashed);
-}
-.border-stitched-thick {
-  border: 2px dashed var(--stitch-dashed);
-}
-.border-stitch-grid {
-  border-bottom: 1px dashed var(--border-stitch);
-}
-
-/* 3. Woven Grid Background Pattern */
-.bg-woven-grid {
-  background-image: 
-    repeating-linear-gradient(0deg, transparent, transparent 15px, rgba(var(--color-accent-rgb), 0.03) 15px, rgba(var(--color-accent-rgb), 0.03) 16px),
-    repeating-linear-gradient(90deg, transparent, transparent 15px, rgba(var(--color-accent-rgb), 0.03) 15px, rgba(var(--color-accent-rgb), 0.03) 16px);
-}
-
-/* 4. Glassmorphism Panels */
-.glass-panel {
-  background: rgba(var(--color-accent-rgb), 0.03);
-  backdrop-filter: blur(12px);
-  border: 1px dashed rgba(var(--color-accent-rgb), 0.25);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-}
-
-/* 5. Custom Monospace Styling */
-.font-mono-stats {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  letter-spacing: -0.025em;
-}
-
-/* Scrollbar Customization */
+/* Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-accent-muted);
+  background: var(--border-color);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-accent);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
 }

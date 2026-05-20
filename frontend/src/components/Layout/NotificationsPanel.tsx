@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAppDispatch, useAppSelector } from '../../store';
 import { toggleNotificationsPanel, markAllAsRead, clearNotifications } from '../../store/notificationsSlice';
-import { IoCloseOutline, IoCheckmarkDoneOutline, IoTrashOutline, IoShieldOutline, IoAlertCircleOutline, IoRibbonOutline } from 'react-icons/io5';
+import { IoCloseOutline, IoCheckmarkDoneOutline, IoTrashOutline, IoShieldOutline, IoAlertCircleOutline, IoPeopleOutline } from 'react-icons/io5';
 
 export const NotificationsPanel: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -19,86 +19,77 @@ export const NotificationsPanel: React.FC = () => {
 
   const getIcon = (type?: string) => {
     if (type === 'security_ip') return <IoShieldOutline className="text-red-500 text-lg" />;
-    if (type === 'challenge') return <IoRibbonOutline className="text-yellow-500 text-lg" />;
+    if (type === 'streak_buddy') return <IoPeopleOutline className="text-accent text-lg" />;
     return <IoAlertCircleOutline className="text-accent text-lg" />;
   };
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
-      {/* Semi-transparent Backdrop */}
       <div 
-        className="absolute inset-0 bg-black/40 backdrop-blur-xs transition-opacity" 
+        className="absolute inset-0 bg-black/30 backdrop-blur-sm" 
         onClick={() => dispatch(toggleNotificationsPanel())}
       ></div>
 
-      {/* Slider container */}
-      <div className="absolute inset-y-0 right-0 max-w-sm w-full bg-background-surface border-l border-border-stitch flex flex-col shadow-floating z-50 animate-slideIn">
+      <div className="absolute inset-y-0 right-0 max-w-sm w-full bg-background-surface border-l border-border flex flex-col shadow-lg z-50">
         
         {/* Header */}
-        <div className="p-4 border-b border-border-stitch flex items-center justify-between">
-          <div className="flex flex-col">
-            <span className="text-[10px] font-bold tracking-wider text-accent uppercase font-mono-stats">INBOX PANEL</span>
-            <h3 className="text-sm font-bold text-text-primary uppercase">Notifications</h3>
-          </div>
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <h3 className="font-semibold">Notifications</h3>
           <button
             onClick={() => dispatch(toggleNotificationsPanel())}
-            className="p-1.5 rounded-lg text-text-secondary hover:text-accent hover:bg-background-primary transition-all focus:outline-none"
+            className="p-1.5 rounded-lg hover:bg-background-primary transition-colors"
           >
             <IoCloseOutline className="text-xl" />
           </button>
         </div>
 
-        {/* Toolbar controls */}
+        {/* Toolbar */}
         {items.length > 0 && (
-          <div className="px-4 py-2 border-b border-border-stitch bg-background-primary/40 flex items-center justify-between text-[10px]">
+          <div className="px-4 py-2 border-b border-border bg-background-primary/50 flex items-center justify-between text-xs">
             <button
               onClick={handleMarkAllRead}
-              className="flex items-center gap-1 font-bold text-text-secondary hover:text-accent uppercase font-mono-stats"
+              className="flex items-center gap-1 text-text-secondary hover:text-accent transition-colors"
             >
-              <IoCheckmarkDoneOutline className="text-xs" />
+              <IoCheckmarkDoneOutline className="text-sm" />
               <span>Mark All Read</span>
             </button>
 
             <button
               onClick={handleClearAll}
-              className="flex items-center gap-1 font-bold text-text-secondary hover:text-red-500 uppercase font-mono-stats"
+              className="flex items-center gap-1 text-text-secondary hover:text-red-500 transition-colors"
             >
-              <IoTrashOutline className="text-xs" />
-              <span>Purge All</span>
+              <IoTrashOutline className="text-sm" />
+              <span>Clear All</span>
             </button>
           </div>
         )}
 
-        {/* Notifications list */}
+        {/* List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {items.length === 0 ? (
-            <div className="h-64 flex flex-col items-center justify-center text-center p-6 border border-dashed border-border-stitch rounded-xl">
-              <span className="text-4xl filter grayscale mb-2">📬</span>
-              <h4 className="text-xs font-bold text-text-primary uppercase font-mono-stats">Clear Horizon</h4>
-              <p className="text-[10px] text-text-secondary mt-1">
-                Your focus canvas is completely clean. No pending alerts.
-              </p>
+            <div className="h-64 flex flex-col items-center justify-center text-center p-6">
+              <span className="text-4xl mb-2">📬</span>
+              <h4 className="font-medium">No notifications</h4>
+              <p className="text-xs text-text-secondary mt-1">You're all caught up!</p>
             </div>
           ) : (
             items.map((item) => (
               <div
                 key={item.id}
-                className={`
-                  p-3 rounded-lg border text-left transition-all relative overflow-hidden
-                  ${item.read ? 'bg-background-primary/30 border-border-stitch/60 text-text-secondary' : 'bg-background-primary border-accent/30 text-text-primary'}
-                `}
+                className={`p-3 rounded-xl border transition-all ${
+                  item.read ? 'bg-background-primary/30 border-border' : 'bg-background-primary border-accent/20'
+                }`}
               >
-                {/* Active indicator bead */}
                 {!item.read && (
-                  <span className="absolute top-3 right-3 w-1.5 h-1.5 bg-accent rounded-full animate-ping"></span>
+                  <span className="absolute top-3 right-3 w-2 h-2 bg-accent rounded-full"></span>
                 )}
 
                 <div className="flex gap-2.5 items-start">
                   <div className="mt-0.5">{getIcon(item.type)}</div>
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-tight">{item.title}</h4>
-                    <p className="text-[10px] text-text-secondary leading-normal mt-1">{item.body}</p>
-                    <span className="text-[8px] font-mono-stats text-text-secondary/60 mt-2 block">
+                    <h4 className="text-sm font-medium">{item.title}</h4>
+                    <p className="text-xs text-text-secondary mt-0.5">{item.body}</p>
+                    <span className="text-[10px] text-text-secondary/60 mt-2 block">
                       {new Date(item.createdAt).toLocaleString()}
                     </span>
                   </div>

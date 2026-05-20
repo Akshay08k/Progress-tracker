@@ -1,12 +1,14 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 export type ThemeType = 
-  | 'dark-void' 
-  | 'light-canvas' 
-  | 'forest-green' 
-  | 'midnight-purple' 
-  | 'ember-orange' 
-  | 'arctic-frost';
+  | 'light' 
+  | 'dark' 
+  | 'forest' 
+  | 'ocean' 
+  | 'sunset' 
+  | 'rose';
+
+const THEMES: ThemeType[] = ['light', 'dark', 'forest', 'ocean', 'sunset', 'rose'];
 
 interface ThemeState {
   currentTheme: ThemeType;
@@ -15,9 +17,20 @@ interface ThemeState {
 const getInitialTheme = (): ThemeType => {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('theme');
-    if (saved) return saved as ThemeType;
+    if (saved && THEMES.includes(saved as ThemeType)) {
+      return saved as ThemeType;
+    }
   }
-  return 'dark-void';
+  return 'light';
+};
+
+const applyTheme = (theme: ThemeType) => {
+  if (typeof window === 'undefined') return;
+  
+  THEMES.forEach(t => {
+    document.body.classList.remove(`theme-${t}`);
+  });
+  document.body.classList.add(`theme-${theme}`);
 };
 
 const initialState: ThemeState = {
@@ -32,7 +45,7 @@ const themeSlice = createSlice({
       state.currentTheme = action.payload;
       if (typeof window !== 'undefined') {
         localStorage.setItem('theme', action.payload);
-        document.body.className = `theme-${action.payload}`;
+        applyTheme(action.payload);
       }
     },
   },

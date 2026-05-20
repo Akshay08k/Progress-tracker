@@ -34,11 +34,6 @@ export async function GET(request) {
   }
 
   try {
-    // 1. Total users
-    const usersSnapshot = await adminDb.collection('users').get();
-    const totalUsers = usersSnapshot.size;
-
-    // 2. Start of today and start of week timestamps
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const startOfTodayStr = startOfToday.toISOString();
@@ -48,27 +43,44 @@ export async function GET(request) {
     startOfWeek.setHours(0, 0, 0, 0);
     const startOfWeekStr = startOfWeek.toISOString();
 
-    // 3. Tasks created today
-    const tasksTodaySnapshot = await adminDb.collection('tasks')
-      .where('createdAt', '>=', startOfTodayStr)
-      .get();
-    const tasksCreatedToday = tasksTodaySnapshot.size;
+    const todayStr = new Date().toISOString().split('T')[0];
 
-    // 4. Tasks created this week
-    const tasksWeekSnapshot = await adminDb.collection('tasks')
-      .where('createdAt', '>=', startOfWeekStr)
-      .get();
-    const tasksCreatedWeek = tasksWeekSnapshot.size;
+    // Users
+    const usersSnapshot = await adminDb.collection('users').get();
+    const totalUsers = usersSnapshot.size;
 
-    // 5. Total notifications sent
+    // Habits stats
+    const habitsSnapshot = await adminDb.collection('habits').get();
+    const totalHabits = habitsSnapshot.size;
+
+    let habitsCompletedToday = 0;
+    habitsSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.completions && Array.isArray(data.completions)) {
+        const todayCompletion = data.completions.find(c => c.date === todayStr && c.completed);
+        if (todayCompletion) habitsCompletedToday++;
+      }
+    });
+
+    // Best streak across all users
+    let bestStreak = 0;
+    usersSnapshot.forEach(doc => {
+      const userData = doc.data();
+      if (userData.streak && userData.streak > bestStreak) {
+        bestStreak = userData.streak;
+      }
+    });
+
+    // Notifications
     const notificationsSnapshot = await adminDb.collection('notifications').get();
     const notificationsSent = notificationsSnapshot.size;
 
     return corsResponse({
       stats: {
         totalUsers,
-        tasksCreatedToday,
-        tasksCreatedWeek,
+        totalHabits,
+        habitsCompletedToday,
+        bestStreak,
         notificationsSent
       }
     });

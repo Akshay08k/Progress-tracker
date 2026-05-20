@@ -1,85 +1,68 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '../store';
-import { toggleMoodLog, toggleFocusTimer, showToast } from '../store/uiSlice';
-import { Card } from '../components/UI/Card';
-import { FabricBadge } from '../components/UI/FabricBadge';
-import { StitchProgressBar } from '../components/UI/StitchProgressBar';
-import { getXpProgressPercentage } from '../utils/xp';
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
-} from 'recharts';
-import {
-  IoFlameOutline, IoTimeOutline, IoJournalOutline,
-  IoAlertCircleOutline, IoExtensionPuzzleOutline, IoSparklesOutline, IoPeopleOutline,
-  IoCloseOutline, IoCheckmarkOutline
-} from 'react-icons/io5';
-import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, addDoc } from 'firebase/firestore';
+import { showToast } from '../store/uiSlice';
+import { type Habit, calculateStreak } from '../store/habitsSlice';
 import { db } from '../services/firebase';
+import { collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, where, getDoc } from 'firebase/firestore';
+import {
+  IoAddOutline,
+  IoTrashOutline,
+  IoPencilOutline,
+  IoFlameOutline,
+  IoCheckmarkOutline,
+  IoCloseOutline,
+  IoCalendarOutline,
+  IoTrendingUpOutline,
+  IoPeopleOutline,
+} from 'react-icons/io5';
 
-interface Announcement {
-  message: string;
-  active: boolean;
-}
+const HABIT_COLORS = [
+  '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e',
+  '#f97316', '#eab308', '#22c55e', '#14b8a6',
+  '#06b6d4', '#3b82f6',
+];
+
+const HABIT_ICONS = ['💪', '📚', '🏃', '💧', '🧘', '✍️', '🎯', '💤', '🥗', '🎵'];
 
 export const Dashboard: React.FC = () => {
-  const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
-  const tasks = useAppSelector((state) => state.tasks.items);
-
-  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const habits = useAppSelector((state) => state.habits.items);
   
-  // Streak Buddy States
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
+  const [formName, setFormName] = useState('');
+  const [formDescription, setFormDescription] = useState('');
+  const [formColor, setFormColor] = useState(HABIT_COLORS[0]);
+  const [formIcon, setFormIcon] = useState(HABIT_ICONS[0]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Buddy system states
   const [partnerUidInput, setPartnerUidInput] = useState('');
   const [buddyData, setBuddyData] = useState<any>(null);
   const [incomingInvites, setIncomingInvites] = useState<any[]>([]);
   const [outgoingInvite, setOutgoingInvite] = useState<any>(null);
   const [sendingInvite, setSendingInvite] = useState(false);
+  const [showBuddySection, setShowBuddySection] = useState(false);
 
-  // Sync completed tasks to user's xpHistory once on dashboard load if empty
+  const today = new Date().toISOString().split('T')[0];
+
+  // Single source of truth: Firestore snapshot listener
   useEffect(() => {
-    const syncXpHistory = async () => {
-      if (!user?.uid || (user.xpHistory && user.xpHistory.length > 0)) return;
-      
-      const last7Days = Array.from({ length: 7 }).map((_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        return d.toISOString().split('T')[0];
-      });
+    if (!user?.uid) return;
 
-      const dailyCompletedXp: { [date: string]: number } = {};
-      
-      tasks.forEach(task => {
-        if (task.completed && !task.isDeleted && task.dueDate && last7Days.includes(task.dueDate)) {
-          dailyCompletedXp[task.dueDate] = (dailyCompletedXp[task.dueDate] || 0) + 10;
-        }
-      });
+    const q = query(collection(db, 'habits'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const habitList = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Habit[];
+      dispatch({ type: 'habits/setHabits', payload: habitList });
+    }, (error) => {
+      console.error('Habits snapshot error:', error);
+    });
 
-      const initialHistory = last7Days.map(date => ({
-        date,
-        xp: dailyCompletedXp[date] || 0
-      })).filter(h => h.xp > 0);
+    return () => unsubscribe();
+  }, [user?.uid, dispatch]);
 
-      if (initialHistory.length > 0) {
-        try {
-          const userDocRef = doc(db, 'users', user.uid);
-          await updateDoc(userDocRef, {
-            xpHistory: initialHistory
-          });
-        } catch (e) {
-          console.error('Failed to seed xpHistory from tasks:', e);
-        }
-      }
-    };
-
-    if (tasks.length > 0 && user) {
-      syncXpHistory();
-    }
-  }, [user, tasks]);
-
-  // Real-time Buddy Data observer
+  // Buddy system listeners
   useEffect(() => {
     if (!user?.buddyUid) {
       setBuddyData(null);
@@ -89,17 +72,13 @@ export const Dashboard: React.FC = () => {
       if (docSnap.exists()) {
         setBuddyData(docSnap.data());
       }
-    }, (error) => {
-      console.warn('Buddy sync warning:', error);
     });
     return () => unsub();
   }, [user?.buddyUid]);
 
-  // Real-time Invites observer
   useEffect(() => {
     if (!user?.uid) return;
 
-    // Incoming invites
     const qIn = query(
       collection(db, 'buddyInvites'),
       where('receiverUid', '==', user.uid),
@@ -107,11 +86,8 @@ export const Dashboard: React.FC = () => {
     );
     const unsubIn = onSnapshot(qIn, (snap) => {
       setIncomingInvites(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (error) => {
-      console.warn('Incoming invites sync warning:', error);
     });
 
-    // Outgoing invites
     const qOut = query(
       collection(db, 'buddyInvites'),
       where('senderUid', '==', user.uid),
@@ -123,8 +99,6 @@ export const Dashboard: React.FC = () => {
       } else {
         setOutgoingInvite(null);
       }
-    }, (error) => {
-      console.warn('Outgoing invite sync warning:', error);
     });
 
     return () => {
@@ -133,7 +107,7 @@ export const Dashboard: React.FC = () => {
     };
   }, [user?.uid]);
 
-  // Actions for Buddy System
+  // Buddy actions
   const handleSendInvite = async () => {
     if (!user?.uid) return;
     const target = partnerUidInput.trim();
@@ -142,54 +116,50 @@ export const Dashboard: React.FC = () => {
       return;
     }
     if (target === user.uid) {
-      dispatch(showToast({ message: 'You cannot invite yourself as a buddy!', type: 'error' }));
+      dispatch(showToast({ message: 'You cannot invite yourself!', type: 'error' }));
       return;
     }
     if (user.buddyUid) {
-      dispatch(showToast({ message: 'You are already linked to a buddy. Unlink them first.', type: 'error' }));
+      dispatch(showToast({ message: 'You are already linked to a buddy.', type: 'error' }));
       return;
     }
 
     setSendingInvite(true);
     try {
-      // Check if target user exists in Firestore
       const targetUserDoc = await getDoc(doc(db, 'users', target));
       if (!targetUserDoc.exists()) {
-        dispatch(showToast({ message: 'No registered user found with that UID. Check the ID and try again.', type: 'error' }));
+        dispatch(showToast({ message: 'No user found with that UID.', type: 'error' }));
         setSendingInvite(false);
         return;
       }
 
       const targetData = targetUserDoc.data();
       if (targetData.buddyUid) {
-        dispatch(showToast({ message: 'This user is already linked with another buddy.', type: 'error' }));
+        dispatch(showToast({ message: 'This user is already linked with a buddy.', type: 'error' }));
         setSendingInvite(false);
         return;
       }
 
-      // Add to buddyInvites
       await addDoc(collection(db, 'buddyInvites'), {
         senderUid: user.uid,
-        senderName: user.displayName || 'Stitch Member',
+        senderName: user.displayName || 'User',
         receiverUid: target,
         status: 'pending',
         createdAt: new Date().toISOString()
       });
 
-      // Send real-time notification
       await addDoc(collection(db, 'notifications'), {
         userId: target,
-        title: 'Streak Buddy Invitation 🧵',
-        body: `${user.displayName || 'A fellow weaver'} invited you to be their Streak Buddy! Accept from your Command Console.`,
+        title: 'Streak Buddy Invitation',
+        body: `${user.displayName || 'A user'} invited you to be their Streak Buddy!`,
         type: 'streak_buddy',
         read: false,
         createdAt: new Date().toISOString()
       });
 
-      dispatch(showToast({ message: 'Streak Buddy invitation sent successfully!', type: 'success' }));
+      dispatch(showToast({ message: 'Invitation sent!', type: 'success' }));
       setPartnerUidInput('');
     } catch (e) {
-      console.error(e);
       dispatch(showToast({ message: 'Failed to send invitation.', type: 'error' }));
     } finally {
       setSendingInvite(false);
@@ -199,26 +169,21 @@ export const Dashboard: React.FC = () => {
   const handleAcceptInvite = async (invite: any) => {
     if (!user?.uid) return;
     try {
-      // 1. Update invite status in Firestore
       await updateDoc(doc(db, 'buddyInvites', invite.id), { status: 'accepted' });
-
-      // 2. Set buddyUid on both users
       await updateDoc(doc(db, 'users', user.uid), { buddyUid: invite.senderUid });
       await updateDoc(doc(db, 'users', invite.senderUid), { buddyUid: user.uid });
 
-      // 3. Send acceptance notification back to sender
       await addDoc(collection(db, 'notifications'), {
         userId: invite.senderUid,
-        title: 'Stitch Buddy Synced! 🤝',
-        body: `${user.displayName || 'Your buddy'} accepted your Streak Buddy request! Streaks are now synced.`,
+        title: 'Streak Buddy Connected!',
+        body: `${user.displayName || 'Your buddy'} accepted your request!`,
         type: 'streak_buddy',
         read: false,
         createdAt: new Date().toISOString()
       });
 
-      dispatch(showToast({ message: 'Streak Buddy successfully connected!', type: 'success' }));
+      dispatch(showToast({ message: 'Buddy connected!', type: 'success' }));
     } catch (e) {
-      console.error(e);
       dispatch(showToast({ message: 'Failed to accept invitation.', type: 'error' }));
     }
   };
@@ -235,7 +200,7 @@ export const Dashboard: React.FC = () => {
   const handleCancelInvite = async (invite: any) => {
     try {
       await updateDoc(doc(db, 'buddyInvites', invite.id), { status: 'declined' });
-      dispatch(showToast({ message: 'Outgoing invitation cancelled.', type: 'info' }));
+      dispatch(showToast({ message: 'Invitation cancelled.', type: 'info' }));
     } catch (e) {
       console.error(e);
     }
@@ -245,461 +210,550 @@ export const Dashboard: React.FC = () => {
     if (!user?.uid || !user?.buddyUid) return;
     const oldBuddyUid = user.buddyUid;
     try {
-      // 1. Clear buddyUid from both users
       await updateDoc(doc(db, 'users', user.uid), { buddyUid: null });
       await updateDoc(doc(db, 'users', oldBuddyUid), { buddyUid: null });
 
-      // 2. Send notification to the other buddy
       await addDoc(collection(db, 'notifications'), {
         userId: oldBuddyUid,
-        title: 'Streak Buddy Unlinked 🧵',
-        body: `${user.displayName || 'Your partner'} has disconnected their Streak Buddy account from yours.`,
+        title: 'Streak Buddy Unlinked',
+        body: `${user.displayName || 'Your partner'} unlinked their account.`,
         type: 'streak_buddy',
         read: false,
         createdAt: new Date().toISOString()
       });
 
-      dispatch(showToast({ message: 'Streak Buddy successfully unlinked.', type: 'success' }));
+      dispatch(showToast({ message: 'Buddy unlinked.', type: 'success' }));
     } catch (e) {
-      console.error(e);
       dispatch(showToast({ message: 'Failed to unlink.', type: 'error' }));
     }
   };
 
-  // Fetch announcements
-  useEffect(() => {
-    const fetchAnnouncement = async () => {
-      try {
-        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-        const res = await fetch(`${backendUrl}/api/admin/announcements`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.active) {
-            setAnnouncement(data);
-          }
-        }
-      } catch (e) {
-        console.warn('Could not retrieve active announcements:', e);
-      }
+  // Habit CRUD - only write to Firestore, let snapshot update Redux
+  const handleCreateHabit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formName.trim() || !user?.uid || isSubmitting) return;
+
+    setIsSubmitting(true);
+    const habitData = {
+      userId: user.uid,
+      name: formName.trim(),
+      description: formDescription.trim(),
+      color: formColor,
+      icon: formIcon,
+      completions: [],
+      createdAt: new Date().toISOString(),
+      archived: false,
     };
-    fetchAnnouncement();
-  }, []);
 
-  // Compute Task aggregates
-  const activeTasks = tasks.filter(t => !t.completed && !t.isDeleted);
-  const completedToday = tasks.filter(t => t.completed && !t.isDeleted);
-  const totalToday = tasks.filter(t => !t.isDeleted);
-
-  const completionRate = totalToday.length > 0
-    ? Math.round((completedToday.length / totalToday.length) * 100)
-    : 0;
-
-  // AI Task Coach Tip computation
-  const getCoachTip = () => {
-    const highPriorityCount = activeTasks.filter(t => t.priority === 'high').length;
-    if (highPriorityCount > 1) {
-      return `Coach: You have ${highPriorityCount} high-priority tasks in progress. We recommend allocating a 25-minute Pomodoro focus block to resolve your heaviest thread first!`;
+    try {
+      await addDoc(collection(db, 'habits'), habitData);
+      dispatch(showToast({ message: 'Habit created!', type: 'success' }));
+      handleCloseModal();
+    } catch (err) {
+      dispatch(showToast({ message: 'Failed to create habit', type: 'error' }));
+    } finally {
+      setIsSubmitting(false);
     }
-    if (activeTasks.length === 0 && totalToday.length > 0) {
-      return "Coach: Perfect Stitch! All scheduled canvas nodes have been successfully completed today. Take a break or start a new personal challenge!";
-    }
-    if (totalToday.length === 0) {
-      return "Coach: A blank canvas today. Head over to the Tasks tab to sketch your goals and stitch your first target for today!";
-    }
-    return "Coach: Steady as she goes! Continue making incremental progress. Switch on the Focus Timer to power through your next node.";
   };
 
-  // Recharts Chart 1: Tasks by Category (Donut Chart)
-  const categoryCounts = tasks.reduce((acc: { [key: string]: number }, curr) => {
-    if (curr.isDeleted) return acc;
-    const cat = curr.category || 'General';
-    acc[cat] = (acc[cat] || 0) + 1;
-    return acc;
-  }, {});
+  const handleUpdateHabit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingHabit || !formName.trim() || isSubmitting) return;
 
-  const donutData = Object.entries(categoryCounts).map(([name, value]) => ({
-    name,
-    value
-  }));
+    setIsSubmitting(true);
+    const updates = {
+      name: formName.trim(),
+      description: formDescription.trim(),
+      color: formColor,
+      icon: formIcon,
+    };
 
-  const COLORS = ['#534ab7', '#10b981', '#d85a30', '#7f77dd', '#378add', '#8b5cf6'];
+    try {
+      await updateDoc(doc(db, 'habits', editingHabit.id), updates);
+      dispatch(showToast({ message: 'Habit updated!', type: 'success' }));
+      handleCloseModal();
+    } catch (err) {
+      dispatch(showToast({ message: 'Failed to update habit', type: 'error' }));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-  // Recharts Chart 2: Daily Focus XP (Area Chart - Dynamic last 7 days of focus)
-  const getXpHistoryData = () => {
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const data = [];
+  const handleDeleteHabit = async (id: string) => {
+    if (!window.confirm('Delete this habit?')) return;
+    try {
+      await deleteDoc(doc(db, 'habits', id));
+      dispatch(showToast({ message: 'Habit deleted', type: 'info' }));
+    } catch (err) {
+      dispatch(showToast({ message: 'Failed to delete habit', type: 'error' }));
+    }
+  };
+
+  const handleToggleToday = useCallback(async (habitId: string) => {
+    const habit = habits.find(h => h.id === habitId);
+    if (!habit) return;
     
+    const existingIdx = habit.completions.findIndex(c => c.date === today);
+    let newCompletions: { date: string; completed: boolean }[];
+    
+    if (existingIdx !== -1) {
+      newCompletions = habit.completions.map((c, i) => 
+        i === existingIdx ? { ...c, completed: !c.completed } : c
+      );
+    } else {
+      newCompletions = [...habit.completions, { date: today, completed: true }];
+    }
+
+    try {
+      await updateDoc(doc(db, 'habits', habitId), { completions: newCompletions });
+    } catch (err) {
+      dispatch(showToast({ message: 'Failed to update', type: 'error' }));
+    }
+  }, [habits, today, dispatch]);
+
+  const handleOpenEdit = (habit: Habit) => {
+    setEditingHabit(habit);
+    setFormName(habit.name);
+    setFormDescription(habit.description);
+    setFormColor(habit.color);
+    setFormIcon(habit.icon);
+    setShowCreateModal(true);
+  };
+
+  const handleOpenCreate = () => {
+    setEditingHabit(null);
+    setFormName('');
+    setFormDescription('');
+    setFormColor(HABIT_COLORS[0]);
+    setFormIcon(HABIT_ICONS[0]);
+    setShowCreateModal(true);
+  };
+
+  const handleCloseModal = () => {
+    setShowCreateModal(false);
+    setEditingHabit(null);
+    setIsSubmitting(false);
+  };
+
+  const activeHabits = habits.filter(h => !h.archived);
+  const completedToday = activeHabits.filter(h => 
+    h.completions.some(c => c.date === today && c.completed)
+  ).length;
+  const totalActive = activeHabits.length;
+  const bestStreak = activeHabits.length > 0 
+    ? Math.max(0, ...activeHabits.map(h => calculateStreak(h.completions)))
+    : 0;
+
+  const getLast7Days = () => {
+    const days = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
-      const dayLabel = days[d.getDay()];
-      
-      const historyEntry = user?.xpHistory?.find(h => h.date === dateStr);
-      data.push({
-        day: dayLabel,
-        xp: historyEntry ? historyEntry.xp : 0
+      days.push({
+        date: d.toISOString().split('T')[0],
+        label: d.toLocaleDateString('en', { weekday: 'short' }),
+        day: d.getDate(),
       });
     }
-    return data;
+    return days;
   };
 
-  const xpHistoryData = getXpHistoryData();
-
-  // XP progression details
-  const currentXp = user?.xp || 0;
-  const currentLvl = user?.level || 1;
-  const progressPercent = getXpProgressPercentage(currentXp, currentLvl);
+  const last7Days = getLast7Days();
 
   return (
     <div className="space-y-6">
-
-      {/* Site Announcement Banner */}
-      {announcement && (
-        <div className="bg-accent/10 border border-dashed border-accent text-accent px-4 py-3 rounded-xl flex items-center gap-2.5 shadow-orbital animate-pulse">
-          <IoAlertCircleOutline className="text-xl shrink-0" />
-          <span className="text-xs font-semibold leading-normal">{announcement.message}</span>
-        </div>
-      )}
-
-      {/* Header Profile Title section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold tracking-tight uppercase font-mono-stats">
-            COMMAND CONSOLE
+          <h1 className="text-2xl font-bold text-text-primary">
+            Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}
+            {user?.displayName ? `, ${user.displayName.split(' ')[0]}` : ''}!
           </h1>
-          <p className="text-xs text-text-secondary mt-0.5">
-            Welcome back, <b className="text-text-primary">{user?.displayName || 'StitchXP Member'}</b>. Every stitch counts towards mastery.
+          <p className="text-text-secondary mt-1">
+            {completedToday === totalActive && totalActive > 0
+              ? "All habits completed today! Amazing work!"
+              : `${completedToday} of ${totalActive} habits completed today`}
           </p>
         </div>
-
-        {/* Action Widgets */}
-        <div className="flex items-center gap-3">
+        <div className="flex gap-2">
           <button
-            onClick={() => dispatch(toggleMoodLog(true))}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border-stitch bg-background-surface hover:border-accent text-text-secondary hover:text-accent font-bold text-xs shadow-orbital hover:shadow-floating transition-all active:scale-95 duration-200"
+            onClick={() => setShowBuddySection(!showBuddySection)}
+            className="flex items-center gap-2 px-4 py-2.5 border border-border rounded-xl hover:bg-background-surface transition-colors text-text-primary"
           >
-            <IoJournalOutline className="text-sm" />
-            <span>Reflect Mood</span>
+            <IoPeopleOutline className="text-lg" />
+            <span className="text-sm">Buddy</span>
           </button>
-
           <button
-            onClick={() => dispatch(toggleFocusTimer(true))}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent border-2 border-double border-white text-white font-bold text-xs shadow-orbital hover:shadow-floating transition-all active:scale-95 duration-200"
+            onClick={handleOpenCreate}
+            className="flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent/90 text-white font-medium rounded-xl transition-colors"
           >
-            <IoTimeOutline className="text-sm" />
-            <span>Pomodoro Clock</span>
+            <IoAddOutline className="text-xl" />
+            <span>New Habit</span>
           </button>
         </div>
       </div>
 
-      {/* Stats Board Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-        {/* Card 1: Gamer Leveling & XP */}
-        <Card woven={true} className="lg:col-span-2 flex flex-col md:flex-row items-center gap-6" padding="p-6">
-          <FabricBadge level={currentLvl} xp={currentXp} className="shrink-0" />
-
-          <div className="flex-1 w-full space-y-4">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-background-surface rounded-xl p-5 border border-border">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-orange-500/10 rounded-xl">
+              <IoFlameOutline className="text-orange-500 text-xl" />
+            </div>
             <div>
-              <div className="flex justify-between items-baseline mb-1">
-                <h3 className="text-xs font-bold text-text-secondary uppercase tracking-wide">
-                  Experience Thread Progression
-                </h3>
-                <span className="text-xs font-bold text-accent font-mono-stats">{progressPercent}%</span>
-              </div>
-              <StitchProgressBar progress={progressPercent} height="h-3" />
-            </div>
-
-            <div className="grid grid-cols-3 gap-3 pt-2 text-center border-t border-dashed border-border-stitch">
-              <div className="p-2 bg-background-primary/40 rounded-lg border border-border-stitch">
-                <span className="text-[10px] font-bold text-text-secondary uppercase font-mono-stats block">Streak</span>
-                <span className="text-lg font-bold text-red-500 font-mono-stats flex items-center justify-center gap-0.5">
-                  <IoFlameOutline className="animate-pulse" />
-                  {user?.streak || 0}
-                </span>
-              </div>
-
-              <div className="p-2 bg-background-primary/40 rounded-lg border border-border-stitch">
-                <span className="text-[10px] font-bold text-text-secondary uppercase font-mono-stats block">Completed</span>
-                <span className="text-lg font-bold text-green-500 font-mono-stats">
-                  {completedToday.length}
-                </span>
-              </div>
-
-              <div className="p-2 bg-background-primary/40 rounded-lg border border-border-stitch">
-                <span className="text-[10px] font-bold text-text-secondary uppercase font-mono-stats block">Remaining</span>
-                <span className="text-lg font-bold text-accent font-mono-stats">
-                  {activeTasks.length}
-                </span>
-              </div>
+              <p className="text-sm text-text-secondary">Best Streak</p>
+              <p className="text-2xl font-bold text-text-primary">{bestStreak} days</p>
             </div>
           </div>
-        </Card>
-
-        {/* Card 2: AI Coach Schedulers Panel */}
-        <Card className="flex flex-col justify-between" padding="p-6">
-          <div className="space-y-2">
-            <span className="text-[9px] font-bold tracking-wider text-accent uppercase font-mono-stats block">AI COACH SCHEDULE OPTIMIZER</span>
-            <h3 className="text-xs font-extrabold text-text-primary uppercase flex items-center gap-1">
-              <IoSparklesOutline className="text-accent animate-pulse" />
-              Focus Advisor
-            </h3>
-            <p className="text-xs text-text-secondary leading-relaxed pt-1">
-              {getCoachTip()}
-            </p>
+        </div>
+        <div className="bg-background-surface rounded-xl p-5 border border-border">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-green-500/10 rounded-xl">
+              <IoCheckmarkOutline className="text-green-500 text-xl" />
+            </div>
+            <div>
+              <p className="text-sm text-text-secondary">Completed Today</p>
+              <p className="text-2xl font-bold text-text-primary">{completedToday}/{totalActive}</p>
+            </div>
           </div>
-
-          <div className="pt-4 border-t border-dashed border-border-stitch mt-4 flex justify-between items-center text-[10px] font-bold text-text-secondary">
-            <span>Productivity Ratio:</span>
-            <span className="text-green-500 font-mono-stats">{completionRate}% Done</span>
+        </div>
+        <div className="bg-background-surface rounded-xl p-5 border border-border">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-accent/10 rounded-xl">
+              <IoTrendingUpOutline className="text-accent text-xl" />
+            </div>
+            <div>
+              <p className="text-sm text-text-secondary">Completion Rate</p>
+              <p className="text-2xl font-bold text-text-primary">
+                {totalActive > 0 ? Math.round((completedToday / totalActive) * 100) : 0}%
+              </p>
+            </div>
           </div>
-        </Card>
+        </div>
       </div>
 
-      {/* Recharts Analytics Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* Area Chart: XP trends */}
-        <Card stitched={true} padding="p-6">
-          <div className="mb-4">
-            <span className="text-[9px] font-bold tracking-wider text-accent uppercase font-mono-stats block">XP FOCUS INDEX</span>
-            <h3 className="text-xs font-extrabold text-text-primary uppercase">Weekly Performance Area</h3>
+      {/* Buddy Section */}
+      {showBuddySection && (
+        <div className="bg-background-surface rounded-xl border border-border p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <IoPeopleOutline className="text-xl text-accent" />
+            <h3 className="font-semibold text-text-primary">Streak Buddy</h3>
           </div>
 
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={xpHistoryData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorXp" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--color-accent)" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="var(--color-accent)" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-stitch)" />
-                <XAxis dataKey="day" stroke="#9ca3af" fontSize={10} fontFamily="monospace" />
-                <YAxis stroke="#9ca3af" fontSize={10} fontFamily="monospace" />
-                <Tooltip
-                  contentStyle={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-stitch)' }}
-                  labelStyle={{ color: 'var(--text-primary)', fontSize: '10px', fontFamily: 'monospace' }}
-                  itemStyle={{ color: 'var(--color-accent)', fontSize: '12px' }}
+          {!user?.buddyUid && !outgoingInvite && incomingInvites.length === 0 && (
+            <div className="space-y-3">
+              <p className="text-sm text-text-secondary">Connect with a friend to share streaks and stay accountable.</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={partnerUidInput}
+                  onChange={(e) => setPartnerUidInput(e.target.value)}
+                  placeholder="Enter their User ID..."
+                  disabled={sendingInvite}
+                  className="flex-1 px-4 py-2 border border-border rounded-xl bg-background-primary text-text-primary focus:outline-none focus:ring-2 focus:ring-accent text-sm placeholder:text-text-secondary/40"
                 />
-                <Area type="monotone" dataKey="xp" stroke="var(--color-accent)" strokeWidth={2} fillOpacity={1} fill="url(#colorXp)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        {/* Pie Chart: Tasks breakdown */}
-        <Card stitched={true} padding="p-6">
-          <div className="mb-4">
-            <span className="text-[9px] font-bold tracking-wider text-accent uppercase font-mono-stats block">FOCUS DISTRIBUTIONS</span>
-            <h3 className="text-xs font-extrabold text-text-primary uppercase">Activity Category Breakdown</h3>
-          </div>
-
-          <div className="h-64 w-full flex items-center justify-center">
-            {donutData.length === 0 ? (
-              <div className="text-center p-6 text-text-secondary text-xs">
-                No active tasks to index focus fields. Complete task items to populate distributions!
+                <button
+                  onClick={handleSendInvite}
+                  disabled={sendingInvite}
+                  className="px-5 py-2 bg-accent hover:bg-accent/90 text-white rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
+                >
+                  {sendingInvite ? 'Sending...' : 'Invite'}
+                </button>
               </div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={donutData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {donutData.map((_entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ backgroundColor: 'var(--background-surface)', borderColor: 'var(--border-stitch)' }}
-                    itemStyle={{ fontSize: '12px' }}
-                  />
-                  <Legend
-                    wrapperStyle={{ fontSize: '10px', fontFamily: 'monospace' }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      {/* Accountability partner & Gamification hub links */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-        {/* Accountability Widget */}
-        <Card className="flex flex-col gap-4" padding="p-6">
-          <div className="flex items-start gap-4">
-            <div className="p-3 bg-accent/10 text-accent rounded-xl border border-dashed border-accent/40 shrink-0">
-              <IoPeopleOutline className="text-2xl animate-float-slow" />
             </div>
-            <div className="space-y-1 flex-1 text-left">
-              <span className="text-[9px] font-bold text-accent uppercase font-mono-stats block">ACCOUNTABILITY PAIR</span>
-              <h4 className="text-xs font-bold text-text-primary uppercase">Streak Buddy System</h4>
-              
-              {!user?.buddyUid && !outgoingInvite && incomingInvites.length === 0 && (
-                <>
-                  <p className="text-xs text-text-secondary leading-relaxed">
-                    Collaborate with a friend to share streaks and hold each other accountable! Enter your partner's UID.
-                  </p>
-                  <div className="pt-2.5 flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={partnerUidInput}
-                      onChange={(e) => setPartnerUidInput(e.target.value)}
-                      placeholder="Partner UID..."
-                      disabled={sendingInvite}
-                      className="px-3 py-1.5 bg-background-primary border border-border-stitch rounded-lg text-[10px] text-text-primary focus:outline-none focus:border-accent w-full max-w-[200px] font-mono-stats"
-                    />
+          )}
+
+          {!user?.buddyUid && outgoingInvite && (
+            <div className="space-y-3">
+              <p className="text-sm text-text-secondary">
+                Invite sent to: <span className="font-mono text-xs bg-background-primary px-2 py-1 rounded text-text-primary">{outgoingInvite.receiverUid}</span>
+              </p>
+              <button
+                onClick={() => handleCancelInvite(outgoingInvite)}
+                className="px-4 py-2 border border-red-500/30 text-red-500 rounded-xl text-sm hover:bg-red-500/10 transition-colors"
+              >
+                Cancel Invite
+              </button>
+            </div>
+          )}
+
+          {!user?.buddyUid && incomingInvites.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-sm text-text-secondary">You have a pending invite from:</p>
+              {incomingInvites.map((invite) => (
+                <div key={invite.id} className="p-4 bg-background-primary border border-border rounded-xl flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-text-primary">{invite.senderName}</div>
+                    <div className="text-xs text-text-secondary font-mono truncate max-w-[200px]">{invite.senderUid}</div>
+                  </div>
+                  <div className="flex gap-2">
                     <button
-                      onClick={handleSendInvite}
-                      disabled={sendingInvite}
-                      className="px-4 py-1.5 bg-accent hover:bg-accent/90 border border-white text-white text-[10px] font-extrabold uppercase font-mono-stats rounded-lg shadow-orbital transition-all duration-200"
+                      onClick={() => handleAcceptInvite(invite)}
+                      className="p-2 bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors"
                     >
-                      {sendingInvite ? 'Sending...' : 'Invite'}
+                      <IoCheckmarkOutline />
+                    </button>
+                    <button
+                      onClick={() => handleDeclineInvite(invite)}
+                      className="p-2 border border-border rounded-lg hover:bg-background-surface transition-colors text-text-secondary"
+                    >
+                      <IoCloseOutline />
                     </button>
                   </div>
-                </>
-              )}
-
-              {/* Outgoing pending request */}
-              {!user?.buddyUid && outgoingInvite && (
-                <div className="pt-1.5 space-y-2">
-                  <p className="text-xs text-text-secondary leading-relaxed">
-                    Outgoing invitation sent to:
-                    <span className="block font-mono-stats text-[10px] bg-background-primary/50 border border-border-stitch px-2 py-1 rounded mt-1 truncate">
-                      {outgoingInvite.receiverUid}
-                    </span>
-                    Waiting for them to sync and accept...
-                  </p>
-                  <button
-                    onClick={() => handleCancelInvite(outgoingInvite)}
-                    className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 text-[9px] font-bold uppercase rounded font-mono-stats transition-all"
-                  >
-                    Cancel Invite
-                  </button>
                 </div>
-              )}
-
-              {/* Incoming pending requests */}
-              {!user?.buddyUid && incomingInvites.length > 0 && (
-                <div className="pt-1.5 space-y-3">
-                  <p className="text-xs text-text-secondary leading-relaxed">
-                    You have a pending invite from:
-                  </p>
-                  {incomingInvites.map((invite) => (
-                    <div key={invite.id} className="p-3 bg-background-primary/60 border border-dashed border-accent/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <div className="text-xs font-bold text-text-primary uppercase">{invite.senderName}</div>
-                        <div className="text-[8px] font-mono-stats text-text-secondary/70 truncate max-w-[160px]">{invite.senderUid}</div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          onClick={() => handleAcceptInvite(invite)}
-                          className="p-1 px-2.5 bg-accent text-white border border-white text-[9px] font-extrabold uppercase rounded-md flex items-center gap-1 hover:bg-accent/90 transition-all font-mono-stats"
-                        >
-                          <IoCheckmarkOutline />
-                          Accept
-                        </button>
-                        <button
-                          onClick={() => handleDeclineInvite(invite)}
-                          className="p-1 px-2.5 bg-background-surface text-text-secondary border border-border-stitch text-[9px] font-bold uppercase rounded-md flex items-center gap-1 hover:bg-background-primary transition-all font-mono-stats"
-                        >
-                          <IoCloseOutline />
-                          Decline
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              ))}
             </div>
-          </div>
+          )}
 
-          {/* Linked Buddy Side-by-Side Dashboard */}
           {user?.buddyUid && buddyData && (
-            <div className="pt-2 border-t border-dashed border-border-stitch mt-2 space-y-4 text-left">
-              <div className="grid grid-cols-2 gap-4 text-center">
-                {/* You Column */}
-                <div className="p-3 bg-background-primary/50 border border-border-stitch rounded-xl relative">
-                  <span className="absolute top-2 left-2 text-[8px] font-bold text-accent uppercase font-mono-stats">YOU</span>
-                  <div className="mt-3 font-bold text-text-primary text-sm uppercase truncate">{user.displayName}</div>
-                  <div className="text-[9px] font-mono-stats text-text-secondary mt-0.5">LVL {user.level}</div>
-                  <div className="mt-2 text-xl font-bold font-mono-stats text-red-500 flex items-center justify-center gap-0.5" title="Your Streak">
-                    <IoFlameOutline className="animate-pulse" />
-                    {user.streak || 0}
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-background-primary border border-border rounded-xl text-center">
+                  <div className="text-xs text-accent font-medium uppercase mb-2">You</div>
+                  <div className="font-semibold text-text-primary">{user.displayName}</div>
+                  <div className="text-2xl font-bold text-orange-500 mt-2 flex items-center justify-center gap-1">
+                    <IoFlameOutline /> {user.streak || 0}
                   </div>
-                  <div className="text-[8px] font-mono-stats text-text-secondary/60 mt-1">{user.xp} XP total</div>
                 </div>
-
-                {/* Buddy Column */}
-                <div className="p-3 bg-accent/5 border border-accent/20 rounded-xl relative">
-                  <span className="absolute top-2 left-2 text-[8px] font-bold text-accent uppercase font-mono-stats">BUDDY</span>
-                  <div className="mt-3 font-bold text-text-primary text-sm uppercase truncate">{buddyData.displayName || 'Stitch Buddy'}</div>
-                  <div className="text-[9px] font-mono-stats text-text-secondary mt-0.5">LVL {buddyData.level || 1}</div>
-                  <div className="mt-2 text-xl font-bold font-mono-stats text-red-500 flex items-center justify-center gap-0.5" title="Buddy's Streak">
-                    <IoFlameOutline className="animate-pulse text-red-500" />
-                    {buddyData.streak || 0}
+                <div className="p-4 bg-accent/5 border border-accent/20 rounded-xl text-center">
+                  <div className="text-xs text-accent font-medium uppercase mb-2">Buddy</div>
+                  <div className="font-semibold text-text-primary">{buddyData.displayName || 'Buddy'}</div>
+                  <div className="text-2xl font-bold text-orange-500 mt-2 flex items-center justify-center gap-1">
+                    <IoFlameOutline /> {buddyData.streak || 0}
                   </div>
-                  <div className="text-[8px] font-mono-stats text-text-secondary/60 mt-1">{buddyData.xp || 0} XP total</div>
                 </div>
               </div>
 
-              {/* Comparision motivational banner */}
-              <div className="p-2.5 rounded-lg text-center text-[10px] font-semibold bg-background-primary border border-border-stitch flex items-center justify-center gap-1.5 uppercase font-mono-stats">
-                {user.streak > (buddyData.streak || 0) && (
-                  <span>🏆 You are leading the thread! Keep it up!</span>
-                )}
-                {user.streak < (buddyData.streak || 0) && (
-                  <span>🔥 Catch up! {buddyData.displayName || 'Buddy'} is leading with a {buddyData.streak} day streak!</span>
-                )}
-                {user.streak === (buddyData.streak || 0) && (
-                  <span>💪 Thread Synced! You both have an active {user.streak} day streak!</span>
-                )}
+              <div className="p-3 bg-background-primary border border-border rounded-xl text-center text-sm text-text-primary">
+                {user.streak > (buddyData.streak || 0) && "You're leading! Keep it up!"}
+                {user.streak < (buddyData.streak || 0) && `${buddyData.displayName || 'Buddy'} is leading with ${buddyData.streak} days!`}
+                {user.streak === (buddyData.streak || 0) && `Tied at ${user.streak} days! Thread synced!`}
               </div>
 
-              {/* Unlink button */}
               <div className="flex justify-end">
                 <button
                   onClick={handleUnlinkBuddy}
-                  className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 text-[9px] font-bold uppercase rounded font-mono-stats transition-all"
+                  className="px-4 py-2 border border-red-500/30 text-red-500 rounded-xl text-sm hover:bg-red-500/10 transition-colors"
                 >
                   Unlink Buddy
                 </button>
               </div>
             </div>
           )}
-        </Card>
+        </div>
+      )}
 
-        {/* Quick Navigate panel */}
-        <Card className="flex items-start gap-4" padding="p-6">
-          <div className="p-3 bg-[#d85a30]/10 text-[#d85a30] rounded-xl border border-dashed border-[#d85a30]/40 shrink-0">
-            <IoExtensionPuzzleOutline className="text-2xl" />
-          </div>
-          <div className="space-y-1">
-            <span className="text-[9px] font-bold text-[#d85a30] uppercase font-mono-stats block">GAMIFIED REWARDS</span>
-            <h4 className="text-xs font-bold text-text-primary uppercase">Challenges Hub</h4>
-            <p className="text-xs text-text-secondary leading-relaxed">
-              Gain experience multiplier badges by completing weekly streak and category challenges in the hub!
-            </p>
+      {/* Habits List */}
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold text-text-primary">Your Habits</h2>
+        {activeHabits.length === 0 ? (
+          <div className="text-center py-16 bg-background-surface rounded-xl border border-border">
+            <div className="text-5xl mb-4">🎯</div>
+            <h3 className="text-lg font-semibold text-text-primary">No habits yet</h3>
+            <p className="text-text-secondary mt-1 mb-6">Start building better routines, one habit at a time</p>
             <button
-              onClick={() => navigate('/challenges')}
-              className="mt-2 flex items-center gap-1 px-3 py-1.5 bg-[#d85a30] border border-white text-white rounded text-[10px] font-extrabold uppercase tracking-wide shadow-orbital hover:shadow-floating transition-all active:scale-95 duration-200"
+              onClick={handleOpenCreate}
+              className="px-6 py-2.5 bg-accent hover:bg-accent/90 text-white font-medium rounded-xl transition-colors"
             >
-              Explore Hub
+              Create your first habit
             </button>
           </div>
-        </Card>
+        ) : (
+          <div className="grid gap-3">
+            {activeHabits.map((habit) => {
+              const streak = calculateStreak(habit.completions);
+              const isCompletedToday = habit.completions.some(c => c.date === today && c.completed);
+              
+              return (
+                <div
+                  key={habit.id}
+                  className={`bg-background-surface rounded-xl p-4 border transition-all ${
+                    isCompletedToday ? 'border-green-500/30' : 'border-border'
+                  }`}
+                >
+                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={() => handleToggleToday(habit.id)}
+                      className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${
+                        isCompletedToday
+                          ? 'bg-green-500 text-white'
+                          : 'border-2 border-border hover:border-accent'
+                      }`}
+                    >
+                      {isCompletedToday ? (
+                        <IoCheckmarkOutline className="text-2xl" />
+                      ) : (
+                        <span className="text-2xl">{habit.icon}</span>
+                      )}
+                    </button>
+
+                    <div className="flex-1 min-w-0">
+                      <h3 className={`font-semibold text-text-primary ${isCompletedToday ? 'line-through text-text-secondary' : ''}`}>
+                        {habit.name}
+                      </h3>
+                      {habit.description && (
+                        <p className="text-sm text-text-secondary truncate">{habit.description}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {streak > 0 && (
+                        <div className="flex items-center gap-1 text-orange-500">
+                          <IoFlameOutline />
+                          <span className="font-bold text-sm">{streak}</span>
+                        </div>
+                      )}
+
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => handleOpenEdit(habit)}
+                          className="p-2 hover:bg-background-primary rounded-lg transition-colors"
+                        >
+                          <IoPencilOutline className="text-text-secondary" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteHabit(habit.id)}
+                          className="p-2 hover:bg-red-500/10 rounded-lg transition-colors"
+                        >
+                          <IoTrashOutline className="text-text-secondary hover:text-red-500" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Last 7 days */}
+                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
+                    <IoCalendarOutline className="text-text-secondary text-sm" />
+                    <div className="flex gap-1.5">
+                      {last7Days.map((day) => {
+                        const completed = habit.completions.some(
+                          c => c.date === day.date && c.completed
+                        );
+                        const isToday = day.date === today;
+                        return (
+                          <div
+                            key={day.date}
+                            className={`w-8 h-8 rounded-lg flex flex-col items-center justify-center text-xs ${
+                              completed
+                                ? 'bg-accent text-white'
+                                : isToday
+                                ? 'border border-accent/30 bg-accent/5'
+                                : 'bg-background-primary text-text-secondary'
+                            }`}
+                          >
+                            <span className="text-[9px] opacity-75">{day.label[0]}</span>
+                            <span className="font-medium -mt-0.5">{day.day}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
+      {/* Create/Edit Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-background-surface rounded-2xl w-full max-w-md p-6 border border-border">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold text-text-primary">
+                {editingHabit ? 'Edit Habit' : 'Create New Habit'}
+              </h3>
+              <button
+                onClick={handleCloseModal}
+                className="p-2 hover:bg-background-primary rounded-lg transition-colors text-text-secondary"
+              >
+                <IoCloseOutline className="text-xl" />
+              </button>
+            </div>
+
+            <form onSubmit={editingHabit ? handleUpdateHabit : handleCreateHabit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1.5">Habit Name</label>
+                <input
+                  type="text"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  placeholder="e.g., Morning Exercise"
+                  className="w-full px-4 py-2.5 border border-border rounded-xl bg-background-primary text-text-primary focus:outline-none focus:ring-2 focus:ring-accent placeholder:text-text-secondary/40"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1.5">Description (optional)</label>
+                <input
+                  type="text"
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                  placeholder="e.g., 30 minutes of cardio"
+                  className="w-full px-4 py-2.5 border border-border rounded-xl bg-background-primary text-text-primary focus:outline-none focus:ring-2 focus:ring-accent placeholder:text-text-secondary/40"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1.5">Icon</label>
+                <div className="flex gap-2 flex-wrap">
+                  {HABIT_ICONS.map((icon) => (
+                    <button
+                      key={icon}
+                      type="button"
+                      onClick={() => setFormIcon(icon)}
+                      className={`w-10 h-10 rounded-xl text-xl flex items-center justify-center transition-all ${
+                        formIcon === icon
+                          ? 'bg-accent/10 ring-2 ring-accent'
+                          : 'bg-background-primary hover:bg-background-primary/80'
+                      }`}
+                    >
+                      {icon}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1.5">Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {HABIT_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setFormColor(color)}
+                      className={`w-10 h-10 rounded-xl transition-all ${
+                        formColor === color
+                          ? 'ring-2 ring-offset-2 ring-accent'
+                          : 'hover:scale-110'
+                      }`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleCloseModal}
+                  className="flex-1 px-4 py-2.5 border border-border rounded-xl font-medium hover:bg-background-primary transition-colors text-text-primary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 px-4 py-2.5 bg-accent hover:bg-accent/90 text-white rounded-xl font-medium transition-colors disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Saving...' : (editingHabit ? 'Save Changes' : 'Create Habit')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
